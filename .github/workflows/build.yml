@@ -6,52 +6,45 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+    - name: Checkout this repo
+      uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y bc bison build-essential curl flex git libncurses-dev libssl-dev python3 unzip wget xz-utils
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y bc bison build-essential curl flex git libncurses-dev libssl-dev python3 unzip wget xz-utils
 
-      - name: Clone kernel source
-        run: git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
+    - name: Clone kernel source
+      run: git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
 
-      - name: Merge KernelSU
-        run: |
-          cd kernel
-          git clone --depth=1 https://github.com/tiann/KernelSU.git
-          mv KernelSU/kernel drivers/kernelsu
-          echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+    - name: Download and extract Linaro GCC Toolchain
+      run: |
+        wget https://releases.linaro.org/components/toolchain/binaries/7.5-2019.12/aarch64-linux-gnu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu.tar.xz
+        tar -xf gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu.tar.xz
+        echo "CROSS_COMPILE=$(pwd)/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-" >> $GITHUB_ENV
 
-      - name: Download prebuilt toolchain
-        run: |
-          cd kernel
-          mkdir -p toolchain
-          cd toolchain
-          wget https://releases.linaro.org/components/toolchain/binaries/7.5-2019.12/aarch64-linux-gnu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu.tar.xz
-          tar -xf gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu.tar.xz
-          echo "TOOLCHAIN=toolchain/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu" >> $GITHUB_ENV
+    - name: Build kernel
+      run: |
+        cd kernel
+        make O=out ARCH=arm64 g988_defconfig
+        make -j$(nproc) O=out ARCH=arm64
 
-      - name: Compile Kernel
-        run: |
-          cd kernel
-          export PATH=$GITHUB_WORKSPACE/kernel/$TOOLCHAIN/bin:$PATH
-          make O=out ARCH=arm64 g988_defconfig
-          make -j$(nproc) O=out ARCH=arm64
+    - name: Create boot.tar.md5
+      run: |
+        cd kernel
+        mkdir dist
+        cp out/arch/arm64/boot/Image dist/
+        cp out/arch/arm64/boot/dts/exynos/*.dtb dist/ 2>/dev/null || true
+        cp out/arch/arm64/boot/dts/exynos/*.dtbo dist/ 2>/dev/null || true
+        ./mkbootimg.sh
+        tar -cvf boot.tar boot.img
+        md5sum boot.tar >> boot.tar.md5
+        mv boot.tar.md5 dist/
 
-      - name: Pack boot.img
-        run: |
-          cd kernel
-          curl -Lo mkbootimg.sh https://raw.githubusercontent.com/osm0sis/mkbootimg/master/mkbootimg.sh
-          chmod +x mkbootimg.sh
-          ./mkbootimg.sh --kernel out/arch/arm64/boot/Image -o boot.img
-          tar -cvf boot.tar boot.img
-          md5sum boot.tar > boot.tar.md5
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: boot.tar.md5
-          path: kernel/boot.tar.md5
+    - name: Upload boot.tar.md5
+      uses: actions/upload-artifact@v4
+      with:
+        name: boot.tar.md5
+        path: kernel/dist/boot.tar.md5
