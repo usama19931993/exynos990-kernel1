@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout this repo
+    - name: Checkout dummy repo
       uses: actions/checkout@v4
 
     - name: Install dependencies
@@ -16,35 +16,35 @@ jobs:
         sudo apt update
         sudo apt install -y bc bison build-essential curl flex git libncurses-dev libssl-dev python3 unzip wget xz-utils
 
-    - name: Clone kernel source
+    - name: Clone kernel source into kernel/ folder
       run: git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
 
-    - name: Download and extract Linaro GCC Toolchain
+    - name: Clone KernelSU and move into drivers/kernelsu
       run: |
-        wget https://releases.linaro.org/components/toolchain/binaries/7.5-2019.12/aarch64-linux-gnu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu.tar.xz
-        tar -xf gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu.tar.xz
-        echo "CROSS_COMPILE=$(pwd)/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-" >> $GITHUB_ENV
+        cd kernel
+        git clone --depth=1 https://github.com/tiann/KernelSU.git
+        mv KernelSU/kernel drivers/kernelsu
 
-    - name: Build kernel
+    - name: Append KernelSU Kconfig to drivers/Kconfig
+      run: echo 'source "drivers/kernelsu/Kconfig"' >> kernel/drivers/Kconfig
+
+    - name: Download and extract proper toolchain
+      run: |
+        mkdir -p toolchain
+        cd toolchain
+        wget https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/heads/master.tar.gz -O toolchain.tar.gz
+        tar -xzf toolchain.tar.gz
+        echo "CROSS_COMPILE=$(pwd)/aarch64-linux-android-" >> $GITHUB_ENV
+        echo "PATH=$(pwd):$PATH" >> $GITHUB_ENV
+
+    - name: Build the kernel
       run: |
         cd kernel
         make O=out ARCH=arm64 g988_defconfig
         make -j$(nproc) O=out ARCH=arm64
 
-    - name: Create boot.tar.md5
+    - name: Pack boot.img into boot.tar.md5
       run: |
         cd kernel
-        mkdir dist
-        cp out/arch/arm64/boot/Image dist/
-        cp out/arch/arm64/boot/dts/exynos/*.dtb dist/ 2>/dev/null || true
-        cp out/arch/arm64/boot/dts/exynos/*.dtbo dist/ 2>/dev/null || true
-        ./mkbootimg.sh
-        tar -cvf boot.tar boot.img
-        md5sum boot.tar >> boot.tar.md5
-        mv boot.tar.md5 dist/
-
-    - name: Upload boot.tar.md5
-      uses: actions/upload-artifact@v4
-      with:
-        name: boot.tar.md5
-        path: kernel/dist/boot.tar.md5
+        bash ./mkbootimg.sh
+        tar -cvf boot.tar.md5 boot.img
