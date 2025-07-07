@@ -18,38 +18,37 @@ jobs:
       - name: Clone kernel source into kernel/ folder
         run: git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
 
-      - name: Merge KernelSU into source
+      - name: Clone KernelSU
         run: |
           cd kernel
           git clone --depth=1 https://github.com/tiann/KernelSU.git
           mv KernelSU/kernel drivers/kernelsu
           echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
-          echo 'obj-y += kernelsu/' >> drivers/Makefile
 
-      - name: Prepare defconfig
-        run: |
-          cd kernel
-          make O=out ARCH=arm64 g988_defconfig
+      - name: Enable KernelSU in defconfig
+        run: echo 'CONFIG_KSU=y' >> kernel/arch/arm64/configs/g988_defconfig
 
       - name: Build kernel
         run: |
           cd kernel
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export PATH="$HOME/toolchains/gcc/bin:$PATH"
+          mkdir -p out
+          make O=out ARCH=arm64 g988_defconfig
           make -j$(nproc) O=out ARCH=arm64
 
-      - name: Build boot.img
+      - name: Package boot image for Odin
         run: |
           cd kernel
-          ./mkbootimg.sh
-
-      - name: Create boot.tar.md5 for Odin
-        run: |
-          cd kernel
-          tar -H ustar -c boot.img > boot.tar
-          md5sum -t boot.tar >> boot.tar
-          mv boot.tar boot.tar.md5
+          mkdir -p dist
+          cp out/arch/arm64/boot/Image dist/
+          cp out/arch/arm64/boot/dts/exynos/*.dtb dist/
+          cat dist/Image dist/*.dtb > dist/boot.img
+          tar -H ustar -c dist/boot.img > dist/boot.tar
+          mv dist/boot.tar dist/boot.tar.md5
 
       - name: Upload boot.tar.md5
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: boot.tar.md5
-          path: kernel/boot.tar.md5
+          path: kernel/dist/boot.tar.md5
