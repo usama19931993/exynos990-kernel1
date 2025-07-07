@@ -257,3 +257,4 @@ source "drivers/kernelsu/Kconfig"
 endmenu
 source "drivers/kernelsu/Kconfig"
 source "drivers/kernelsu/Kconfig"
+source "drivers/kernelsu/Kconfig"
