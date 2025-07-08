@@ -36,31 +36,31 @@ jobs:
       run: |
         git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
         cd kernel
-        
-        # إصلاحات KernelSU
-        git clone --depth=1 https://github.com/tiann/KernelSU.git
-        mv KernelSU/kernel drivers/kernelsu
-        echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
-        
-        # إنشاء ملف config افتراضي إذا لم يوجد
-        if [ ! -f "arch/arm64/configs/exynos990_defconfig" ]; then
-          make ARCH=arm64 defconfig
-          cp .config arch/arm64/configs/exynos990_defconfig
-        fi
+        mkdir -p out
+
+    - name: Generate config
+      run: |
+        cd kernel
+        # المحاولة مع configs متعددة
+        for config in exynos990_defconfig defconfig; do
+          if [ -f "arch/arm64/configs/$config" ]; then
+            make O=out ARCH=arm64 $config && break
+          fi
+        done || {
+          # إذا فشل كل شيء، إنشاء config افتراضي
+          make O=out ARCH=arm64 defconfig || make O=out ARCH=arm64 savedefconfig
+        }
 
     - name: Build kernel
       run: |
         cd kernel
-        make O=out ARCH=arm64 exynos990_defconfig || \
-        make O=out ARCH=arm64 defconfig
-        
         make -j$(nproc) O=out ARCH=arm64 \
           CC=clang-14 \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
           LD=ld.lld-14 \
           LLVM=1 \
-          KCFLAGS="-Wno-error -march=armv8.2-a"
+          KCFLAGS="-Wno-error"
 
     - name: Package image
       run: |
