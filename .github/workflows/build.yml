@@ -14,10 +14,25 @@ jobs:
     - name: Clean workspace
       run: rm -rf kernel toolchain
 
-    - name: Install dependencies
+    - name: Install modern dependencies
       run: |
         sudo apt update
-        sudo apt install -y bc bison build-essential clang-12 flex git libncurses-dev libssl-dev lld-12 python3 unzip wget xz-utils
+        sudo apt install -y \
+          bc \
+          bison \
+          build-essential \
+          clang-14 \
+          flex \
+          git \
+          libncurses-dev \
+          libssl-dev \
+          lld-14 \
+          python3 \
+          unzip \
+          wget \
+          xz-utils
+        echo "CC=clang-14" >> $GITHUB_ENV
+        echo "LD=ld.lld-14" >> $GITHUB_ENV
 
     - name: Clone kernel source
       run: |
@@ -32,23 +47,15 @@ jobs:
     - name: Append KernelSU Kconfig
       run: echo 'source "drivers/kernelsu/Kconfig"' >> kernel/drivers/Kconfig
 
-    - name: Setup Toolchain
-      run: |
-        echo "CC=clang-12" >> $GITHUB_ENV
-        echo "CLANG_TRIPLE=aarch64-linux-gnu-" >> $GITHUB_ENV
-        echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
-        echo "LD=ld.lld-12" >> $GITHUB_ENV
-        echo "LLVM=1" >> $GITHUB_ENV
-
     - name: Build kernel
       run: |
         cd kernel
         make O=out ARCH=arm64 g988_defconfig
         make -j$(nproc) O=out ARCH=arm64 \
-          CC=clang-12 \
+          CC=clang-14 \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
-          LD=ld.lld-12 \
+          LD=ld.lld-14 \
           LLVM=1
 
     - name: Create boot image
