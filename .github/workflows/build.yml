@@ -45,26 +45,21 @@ jobs:
         echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
         mkdir -p out
 
-    - name: Replace Mali GPU driver
+    - name: Remove problematic GPU drivers
       run: |
-        cd kernel/drivers/gpu
-        rm -rf arm
-        git clone --depth=1 https://gitlab.freedesktop.org/panfrost/drm.git arm
-        echo 'source "drivers/gpu/arm/Kconfig"' >> ../Kconfig
+        cd kernel
+        rm -rf drivers/gpu/arm
+        ./scripts/config --file out/.config \
+          --disable CONFIG_MALI_BIFROST \
+          --disable CONFIG_DRM_PANFROST \
+          --disable CONFIG_DRM
+        echo "CONFIG_FB=y" >> out/.config
+        echo "CONFIG_FB_SIMPLE=y" >> out/.config
 
     - name: Configure kernel
       run: |
         cd kernel
         make O=out ARCH=arm64 extreme_z3s_defconfig
-        
-        # إعدادات GPU الجديدة
-        ./scripts/config --file out/.config \
-          --disable CONFIG_MALI_BIFROST \
-          --disable CONFIG_MALI_BIFROST_R38P1 \
-          --enable CONFIG_DRM_PANFROST \
-          --enable CONFIG_DRM_SCHED \
-          --set-val CONFIG_DRM_PANFROST_DEVFREQ y
-        
         make O=out ARCH=arm64 olddefconfig
 
     - name: Build kernel
