@@ -14,7 +14,7 @@ jobs:
     - name: Clean workspace
       run: rm -rf kernel
 
-    - name: Install dependencies
+    - name: Install full toolchain
       run: |
         sudo apt update
         sudo apt install -y \
@@ -27,40 +27,45 @@ jobs:
           libncurses-dev \
           libssl-dev \
           lld-14 \
+          llvm-14 \
+          llvm-14-tools \
           python3 \
           unzip \
           wget \
           xz-utils
+        sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
+        sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
+        echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
 
-    - name: Clone and prepare kernel
+    - name: Clone and patch kernel
       run: |
         git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
         cd kernel
-        mkdir -p out
-
-    - name: Generate config
-      run: |
-        cd kernel
-        # المحاولة مع configs متعددة
-        for config in exynos990_defconfig defconfig; do
-          if [ -f "arch/arm64/configs/$config" ]; then
-            make O=out ARCH=arm64 $config && break
-          fi
-        done || {
-          # إذا فشل كل شيء، إنشاء config افتراضي
-          make O=out ARCH=arm64 defconfig || make O=out ARCH=arm64 savedefconfig
-        }
+        
+        # إصلاحات KernelSU
+        git clone --depth=1 https://github.com/tiann/KernelSU.git
+        mv KernelSU/kernel drivers/kernelsu
+        echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+        
+        # إصلاحات Exynos
+        sed -i 's/-march=cortex-a76/-march=armv8.2-a+crypto+dotprod/g' arch/arm64/Makefile
+        sed -i 's/-mlittle-endian//g' Makefile
+        
+        # إصلاحات VDSO
+        sed -i 's/VDSO_SYMBOL(current->mm->context.vdso, sigtramp)/(void *)0xffff0000/g' arch/arm64/kernel/signal.c
 
     - name: Build kernel
       run: |
         cd kernel
+        make O=out ARCH=arm64 exynos990_defconfig
         make -j$(nproc) O=out ARCH=arm64 \
           CC=clang-14 \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
           LD=ld.lld-14 \
           LLVM=1 \
-          KCFLAGS="-Wno-error"
+          LLVM_IAS=1 \
+          KCFLAGS="-Wno-error -march=armv8.2-a"
 
     - name: Package image
       run: |
