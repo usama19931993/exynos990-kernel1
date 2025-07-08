@@ -8,10 +8,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repo
+    - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Install toolchain & dependencies
+    - name: Install dependencies
       run: |
         sudo apt update
         sudo apt install -y \
@@ -34,10 +34,13 @@ jobs:
         sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
         echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
 
-    - name: Clone kernel & add KernelSU
+    - name: Clone kernel source
       run: |
         rm -rf kernel
         git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
+
+    - name: Clone and integrate KernelSU
+      run: |
         cd kernel
         git clone --depth=1 https://github.com/tiann/KernelSU.git
         mkdir -p drivers/kernelsu
@@ -50,13 +53,10 @@ jobs:
       run: |
         cd kernel
         make O=out ARCH=arm64 extreme_z3s_defconfig
-
-        # إعدادات GPU المعدلة
         ./scripts/config --file out/.config \
           --set-val CONFIG_MALI_BIFROST y \
           --set-val CONFIG_MALI_BIFROST_R38P1 n \
           --set-val CONFIG_MALI_PLATFORM_NAME "exynos"
-
         make O=out ARCH=arm64 olddefconfig
 
     - name: Build kernel
@@ -69,7 +69,8 @@ jobs:
           LD=ld.lld-14 \
           LLVM=1 \
           LLVM_IAS=1 \
-          KCFLAGS="-Wno-error -march=armv8.2-a"
+          KCFLAGS="-Wno-error -march=armv8.2-a" \
+        2>&1 | tee out/build.log || (echo "❌ Build failed. Showing last 200 lines:" && tail -n 200 out/build.log && exit 1)
 
     - name: Package boot image
       run: |
