@@ -36,25 +36,22 @@ jobs:
       run: |
         git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
 
-    - name: Prepare build environment
+    - name: Fix architecture issues
       run: |
         cd kernel
-        # إصلاح مشاكل التوافق
-        find . -type f -name "Makefile*" -exec sed -i 's/-mlittle-endian//g' {} \;
-        find . -type f -name "Makefile*" -exec sed -i 's/-mcpu=/-march=/g' {} \;
-        
-        # تهيئة مجلد الإخراج
-        mkdir -p out
+        # إصلاح مشاكل العتاد
+        find . -name Makefile* -exec sed -i 's/-march=cortex-a76/-march=armv8-a/g' {} +
+        # إصلاح مشاكل التوافق الأخرى
+        sed -i 's/-mlittle-endian//g' Makefile
+        sed -i 's/-mcpu=/-march=/g' Makefile
 
     - name: Generate config
       run: |
         cd kernel
-        # المحاولة مع defconfig أولاً
-        if ! make O=out ARCH=arm64 defconfig; then
-          echo "Trying savedefconfig..."
-          make O=out ARCH=arm64 savedefconfig
-          cp out/defconfig arch/arm64/configs/temp_defconfig
-          make O=out ARCH=arm64 temp_defconfig
+        make O=out ARCH=arm64 defconfig
+        # أو استخدام config موجود إذا كان متاحاً
+        if [ -f "arch/arm64/configs/exynos990_defconfig" ]; then
+          make O=out ARCH=arm64 exynos990_defconfig
         fi
 
     - name: Build kernel
@@ -66,7 +63,7 @@ jobs:
           CROSS_COMPILE=aarch64-linux-gnu- \
           LD=ld.lld-14 \
           LLVM=1 \
-          KCFLAGS="-Wno-error=implicit-function-declaration"
+          KCFLAGS="-Wno-error=implicit-function-declaration -march=armv8-a"
 
     - name: Create boot image
       run: |
