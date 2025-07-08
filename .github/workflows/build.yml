@@ -8,13 +8,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout dummy repo
+    - name: Checkout
       uses: actions/checkout@v4
 
     - name: Clean workspace
-      run: rm -rf kernel toolchain
+      run: rm -rf kernel
 
-    - name: Install dependencies
+    - name: Install Exynos-specific tools
       run: |
         sudo apt update
         sudo apt install -y \
@@ -35,37 +35,32 @@ jobs:
     - name: Clone kernel source
       run: |
         git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
+        cd kernel
+        git clone --depth=1 https://github.com/tiann/KernelSU.git
+        mv KernelSU/kernel drivers/kernelsu
+        echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
 
-    - name: Fix architecture issues
+    - name: Patch Exynos 990 configs
       run: |
         cd kernel
-        # إصلاح مشاكل العتاد
-        find . -name Makefile* -exec sed -i 's/-march=cortex-a76/-march=armv8-a/g' {} +
-        # إصلاح مشاكل التوافق الأخرى
-        sed -i 's/-mlittle-endian//g' Makefile
+        # إصلاحات خاصة بمعمارية Exynos 990
+        sed -i 's/-march=cortex-a76/-march=armv8.2-a+crypto+dotprod/g' arch/arm64/Makefile
         sed -i 's/-mcpu=/-march=/g' Makefile
+        echo "CONFIG_EXYNOS990=y" >> arch/arm64/configs/exynos990_defconfig
 
-    - name: Generate config
+    - name: Build with Exynos optimizations
       run: |
         cd kernel
-        make O=out ARCH=arm64 defconfig
-        # أو استخدام config موجود إذا كان متاحاً
-        if [ -f "arch/arm64/configs/exynos990_defconfig" ]; then
-          make O=out ARCH=arm64 exynos990_defconfig
-        fi
-
-    - name: Build kernel
-      run: |
-        cd kernel
+        make O=out ARCH=arm64 exynos990_defconfig
         make -j$(nproc) O=out ARCH=arm64 \
           CC=clang-14 \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
           LD=ld.lld-14 \
           LLVM=1 \
-          KCFLAGS="-Wno-error=implicit-function-declaration -march=armv8-a"
+          KCFLAGS="-Wno-error -march=armv8.2-a"
 
-    - name: Create boot image
+    - name: Package boot image
       run: |
         cd kernel
         bash ./mkbootimg.sh
