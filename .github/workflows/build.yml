@@ -38,19 +38,23 @@ jobs:
       run: |
         git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
 
-    - name: Clone KernelSU
+    - name: Find and use correct defconfig
       run: |
         cd kernel
-        git clone --depth=1 https://github.com/tiann/KernelSU.git
-        mv KernelSU/kernel drivers/kernelsu
-
-    - name: Append KernelSU Kconfig
-      run: echo 'source "drivers/kernelsu/Kconfig"' >> kernel/drivers/Kconfig
+        # البحث عن ملف الإعدادات المناسب
+        if [ -f "arch/arm64/configs/g988_defconfig" ]; then
+          echo "CONFIG_NAME=g988_defconfig" >> $GITHUB_ENV
+        elif [ -f "arch/arm64/configs/exynos990_defconfig" ]; then
+          echo "CONFIG_NAME=exynos990_defconfig" >> $GITHUB_ENV
+        else
+          echo "CONFIG_NAME=$(ls arch/arm64/configs/ | grep -i 'exynos\|samsung' | head -1)" >> $GITHUB_ENV
+        fi
+        echo "Using config: $CONFIG_NAME"
 
     - name: Build kernel
       run: |
         cd kernel
-        make O=out ARCH=arm64 g988_defconfig
+        make O=out ARCH=arm64 $CONFIG_NAME
         make -j$(nproc) O=out ARCH=arm64 \
           CC=clang-14 \
           CLANG_TRIPLE=aarch64-linux-gnu- \
