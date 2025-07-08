@@ -31,63 +31,53 @@ jobs:
           wget \
           xz-utils
         sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
+        sudo ln -sf /usr/bin/llvm-nm-14 /usr/bin/llvm-nm
+        sudo ln -sf /usr/bin/llvm-objcopy-14 /usr/bin/llvm-objcopy
         sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
-        echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
+        sudo ln -sf /usr/bin/llvm-strip-14 /usr/bin/llvm-strip
 
-    - name: Clone kernel source
+    - name: Clone KernelSU
       run: |
-        rm -rf kernel
-        git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
+        git clone --depth=1 https://github.com/KernelSU/KernelSU kernelSU
+        rm -rf kernelSU/.git
+        cp -rvf kernelSU/* .
 
-    - name: Clone and integrate KernelSU
+    - name: Prepare environment
       run: |
-        cd kernel
-        git clone --depth=1 https://github.com/tiann/KernelSU.git
-        mkdir -p drivers/kernelsu
-        cp -r KernelSU/kernel/* drivers/kernelsu/
-        echo 'obj-y += kernelsu/' >> drivers/Makefile
-        echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
-        mkdir -p out
+        export ARCH=arm64
+        export SUBARCH=arm64
+        export KBUILD_COMPILER_STRING="Clang 14"
+        export KBUILD_BUILD_USER=github
+        export KBUILD_BUILD_HOST=actions
+        export CLANG_TRIPLE=aarch64-linux-gnu-
 
-    - name: Configure kernel
+    - name: Build Kernel
       run: |
-        cd kernel
-        make O=out ARCH=arm64 extreme_z3s_defconfig
-
-    - name: Build kernel
-      run: |
-        cd kernel
-        make -j$(nproc) O=out ARCH=arm64 \
-          CC=clang-14 \
+        make ARCH=arm64 exynos990-sm-g988b_defconfig
+        make -j$(nproc) \
+          ARCH=arm64 \
+          CC=clang \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
-          LD=ld.lld-14 \
-          LLVM=1 \
-          LLVM_IAS=1 \
-          KCFLAGS="-Wno-error -march=armv8.2-a" \
-        2>&1 | tee out/build.log || (echo "❌ Build failed:" && tail -n 100 out/build.log && exit 1)
+          CROSS_COMPILE_ARM32=arm-linux-gnueabi-
 
-    - name: Create boot.img using AOSP mkbootimg
+    - name: Download AnyKernel3
       run: |
-        cd kernel
-        mkdir tools
-        wget https://android.googlesource.com/platform/system/tools/mkbootimg/+/refs/heads/master/mkbootimg.py?format=TEXT -O tools/mkbootimg.b64
-        base64 -d tools/mkbootimg.b64 > tools/mkbootimg.py
-        chmod +x tools/mkbootimg.py
-        wget https://android.googlesource.com/platform/system/core/+/refs/heads/master/libcutils/include/private/android_filesystem_config.h?format=TEXT -O tools/afc.h.b64
-        base64 -d tools/afc.h.b64 > tools/afc.h || true
+        git clone https://github.com/osama19931993/AnyKernel3.git
 
-        # Replace the values below with actual ones from your device if needed:
-        export BASE_ADDR=0x10000000
-        export PAGE_SIZE=2048
-        export DTB_PATH="arch/arm64/boot/dts/exynos/your_device.dtb"
-        export KERNEL_IMG="out/arch/arm64/boot/Image"
+    - name: Copy kernel files to AnyKernel3
+      run: |
+        cp arch/arm64/boot/Image.gz AnyKernel3/
+        cp arch/arm64/boot/dts/exynos/*.dtb AnyKernel3/
+        cd AnyKernel3 && cat *.dtb > dtb && rm *.dtb
 
-        python3 tools/mkbootimg.py \
-          --kernel $KERNEL_IMG \
-          --base $BASE_ADDR \
-          --pagesize $PAGE_SIZE \
-          --output boot.img
+    - name: Make flashable zip
+      run: |
+        cd AnyKernel3
+        zip -r9 ../SM-G988B-Kernel.zip ./*
 
-        ls -lh boot.img
-        tar -cvf boot.tar.md5 boot.img
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: SM-G988B-Kernel
+        path: SM-G988B-Kernel.zip
