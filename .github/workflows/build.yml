@@ -14,7 +14,7 @@ jobs:
     - name: Clean workspace
       run: rm -rf kernel
 
-    - name: Install Exynos-specific tools
+    - name: Install dependencies
       run: |
         sudo apt update
         sudo apt install -y \
@@ -32,23 +32,24 @@ jobs:
           wget \
           xz-utils
 
-    - name: Clone kernel source
+    - name: Clone and patch kernel
       run: |
         git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
         cd kernel
+        
+        # إصلاحات KernelSU
         git clone --depth=1 https://github.com/tiann/KernelSU.git
         mv KernelSU/kernel drivers/kernelsu
         echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
-
-    - name: Patch Exynos 990 configs
-      run: |
-        cd kernel
-        # إصلاحات خاصة بمعمارية Exynos 990
+        
+        # إصلاح ملف debug-snapshot.h
+        sed -i '250s/$/;/' include/linux/debug-snapshot.h
+        
+        # إصلاحات Exynos
         sed -i 's/-march=cortex-a76/-march=armv8.2-a+crypto+dotprod/g' arch/arm64/Makefile
-        sed -i 's/-mcpu=/-march=/g' Makefile
-        echo "CONFIG_EXYNOS990=y" >> arch/arm64/configs/exynos990_defconfig
+        sed -i 's/-mlittle-endian//g' Makefile
 
-    - name: Build with Exynos optimizations
+    - name: Build kernel
       run: |
         cd kernel
         make O=out ARCH=arm64 exynos990_defconfig
@@ -60,7 +61,7 @@ jobs:
           LLVM=1 \
           KCFLAGS="-Wno-error -march=armv8.2-a"
 
-    - name: Package boot image
+    - name: Package image
       run: |
         cd kernel
         bash ./mkbootimg.sh
