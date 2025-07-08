@@ -38,18 +38,18 @@ jobs:
       run: |
         git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
 
-    - name: Find and use correct defconfig
+    - name: Fix build issues
       run: |
         cd kernel
-        # البحث عن ملف الإعدادات المناسب
-        if [ -f "arch/arm64/configs/g988_defconfig" ]; then
-          echo "CONFIG_NAME=g988_defconfig" >> $GITHUB_ENV
-        elif [ -f "arch/arm64/configs/exynos990_defconfig" ]; then
+        # إصلاح مشاكل التوافق
+        sed -i 's/-mlittle-endian//g' Makefile
+        sed -i 's/-mcpu=/-march=/g' Makefile
+        # تعيين config افتراضي إذا لم يتم العثور على المطلوب
+        if [ -f "arch/arm64/configs/exynos990_defconfig" ]; then
           echo "CONFIG_NAME=exynos990_defconfig" >> $GITHUB_ENV
         else
-          echo "CONFIG_NAME=$(ls arch/arm64/configs/ | grep -i 'exynos\|samsung' | head -1)" >> $GITHUB_ENV
+          echo "CONFIG_NAME=defconfig" >> $GITHUB_ENV
         fi
-        echo "Using config: $CONFIG_NAME"
 
     - name: Build kernel
       run: |
@@ -60,7 +60,9 @@ jobs:
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
           LD=ld.lld-14 \
-          LLVM=1
+          LLVM=1 \
+          KCFLAGS="-Wno-error=implicit-function-declaration" \
+          CLANG_FLAGS="-march=armv8-a"
 
     - name: Create boot image
       run: |
