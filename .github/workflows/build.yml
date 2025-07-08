@@ -49,14 +49,14 @@ jobs:
     - name: Configure kernel
       run: |
         cd kernel
-        # استخدام الإعدادات المتاحة مع تعديلات Exynos
         make O=out ARCH=arm64 extreme_z3s_defconfig
-        ./scripts/config --file out/.config \
-          --set-val CONFIG_EXYNOS990 y \
-          --set-val CONFIG_SOC_S5E9830 y \
-          --set-val CONFIG_MALI_VALHALL y
         
-        # تحديث الإعدادات
+        # إعدادات GPU المعدلة
+        ./scripts/config --file out/.config \
+          --set-val CONFIG_MALI_BIFROST y \
+          --set-val CONFIG_MALI_BIFROST_R38P1 n \
+          --set-val CONFIG_MALI_PLATFORM_NAME "exynos"
+        
         make O=out ARCH=arm64 olddefconfig
 
     - name: Build kernel
@@ -69,7 +69,7 @@ jobs:
           LD=ld.lld-14 \
           LLVM=1 \
           LLVM_IAS=1 \
-          KCFLAGS="-Wno-error -march=armv8.2-a+crypto+dotprod"
+          KCFLAGS="-Wno-error -march=armv8.2-a"
 
     - name: Package image
       run: |
