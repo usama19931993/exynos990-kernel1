@@ -2,10 +2,16 @@ name: Build Kernel for SM-G988B (Extreme Z3S Config)
 
 on:
   workflow_dispatch:
+    inputs:
+      kernel_version:
+        description: 'Kernel version tag/branch'
+        required: true
+        default: 'main'
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
 
     steps:
     - name: Checkout
@@ -24,6 +30,7 @@ jobs:
           clang-14 \
           flex \
           git \
+          libelf-dev \
           libncurses-dev \
           libssl-dev \
           lld-14 \
@@ -32,59 +39,92 @@ jobs:
           python3 \
           unzip \
           wget \
-          xz-utils
-        sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
+          xz-utils \
+          zlib1g-dev
+        
+        sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-14 100
+        sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-14 100
+        sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-14 100
         echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
 
     - name: Clone and prepare kernel
       run: |
-        git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
+        git clone --depth=1 --branch ${{ github.event.inputs.kernel_version }} \
+          https://github.com/usama19931993/exynos990-kernel1.git kernel
         cd kernel
         
-        # إعداد KernelSU
+        # KernelSU integration
         git clone --depth=1 https://github.com/tiann/KernelSU.git
+        rm -rf drivers/kernelsu 2>/dev/null || true
         mv KernelSU/kernel drivers/kernelsu
         echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+        echo 'obj-y += kernelsu/' >> drivers/Makefile
         
-        # إنشاء مجلد الإخراج
+        # Create output directory
         mkdir -p out
+        mkdir -p anykernel3
 
     - name: Configure kernel
       run: |
         cd kernel
-        # تنظيف شامل
         make distclean
         
-        # نسخ ملف الإعدادات المخصص
+        # Apply base config
         cp arch/arm64/configs/extreme_z3s_defconfig out/.config
         
-        # تعديلات أساسية
+        # Essential modifications
         ./scripts/config --file out/.config \
           --disable CONFIG_MALI_BIFROST \
           --disable CONFIG_MALI_BIFROST_R38P1 \
           --enable CONFIG_FB \
-          --enable CONFIG_FB_SIMPLE
+          --enable CONFIG_FB_SIMPLE \
+          --enable CONFIG_KSU \
+          --set-str CONFIG_LOCALVERSION "-ExtremeZ3S"
         
-        # إصلاحات Exynos
-        sed -i 's/-march=cortex-a76/-march=armv8.2-a+crypto+dotprod/g' arch/arm64/Makefile
+        # CPU optimizations
+        sed -i 's/-march=armv8-a/-march=armv8.2-a+crypto+dotprod+fp16/g' arch/arm64/Makefile
         
-        # إعادة توليد التبعيات
+        # Regenerate dependencies
         make O=out ARCH=arm64 olddefconfig
 
     - name: Build kernel
       run: |
         cd kernel
-        make -j$(nproc) O=out ARCH=arm64 \
-          CC=clang-14 \
+        make -j$(($(nproc) - 1)) O=out ARCH=arm64 \
+          CC=clang \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
-          LD=ld.lld-14 \
+          LD=ld.lld \
           LLVM=1 \
           LLVM_IAS=1 \
-          KCFLAGS="-Wno-error -march=armv8.2-a"
+          KCFLAGS="-Wno-error -march=armv8.2-a+crypto+dotprod+fp16" \
+          2>&1 | tee build.log
+        
+        # Check build status
+        if [ ! -f out/arch/arm64/boot/Image ]; then
+          echo "::error::Build failed - Kernel image not found!"
+          exit 1
+        fi
 
     - name: Package image
       run: |
         cd kernel
-        bash ./mkbootimg.sh
+        cp out/arch/arm64/boot/Image anykernel3/
+        cp out/arch/arm64/boot/dts/exynos/*.dtb anykernel3/
+        
+        # Create flashable zip
+        cd anykernel3
+        zip -r9 ../kernel.zip *
+        
+        # Create tar.md5 for Odin
+        cd ..
         tar -cvf boot.tar.md5 boot.img
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: kernel-build
+        path: |
+          kernel/kernel.zip
+          kernel/boot.tar.md5
+          kernel/build.log
