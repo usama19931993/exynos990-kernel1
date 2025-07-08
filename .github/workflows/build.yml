@@ -8,22 +8,35 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout source
+    - name: Checkout repo
       uses: actions/checkout@v4
 
-    - name: Install dependencies
+    - name: Install toolchain & dependencies
       run: |
         sudo apt update
         sudo apt install -y \
-          bc bison build-essential clang-14 flex \
-          git libncurses-dev libssl-dev lld-14 llvm-14 \
-          python3 unzip wget xz-utils libelf-dev
+          bc \
+          bison \
+          build-essential \
+          clang-14 \
+          flex \
+          git \
+          libncurses-dev \
+          libssl-dev \
+          lld-14 \
+          llvm-14 \
+          llvm-14-tools \
+          python3 \
+          unzip \
+          wget \
+          xz-utils
         sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
         sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
         echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
 
-    - name: Prepare kernel + KernelSU
+    - name: Clone kernel & add KernelSU
       run: |
+        rm -rf kernel
         git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
         cd kernel
         git clone --depth=1 https://github.com/tiann/KernelSU.git
@@ -37,20 +50,26 @@ jobs:
       run: |
         cd kernel
         make O=out ARCH=arm64 extreme_z3s_defconfig
+
+        # إعدادات GPU المعدلة
         ./scripts/config --file out/.config \
           --set-val CONFIG_MALI_BIFROST y \
           --set-val CONFIG_MALI_BIFROST_R38P1 n \
           --set-val CONFIG_MALI_PLATFORM_NAME "exynos"
-        ./scripts/config --file out/.config --enable CONFIG_KERNELSU
+
         make O=out ARCH=arm64 olddefconfig
 
     - name: Build kernel
       run: |
         cd kernel
         make -j$(nproc) O=out ARCH=arm64 \
-          CC=clang-14 CLANG_TRIPLE=aarch64-linux-gnu- \
-          CROSS_COMPILE=aarch64-linux-gnu- LD=ld.lld-14 \
-          LLVM=1 LLVM_IAS=1 KCFLAGS="-Wno-error -march=armv8.2-a"
+          CC=clang-14 \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          LD=ld.lld-14 \
+          LLVM=1 \
+          LLVM_IAS=1 \
+          KCFLAGS="-Wno-error -march=armv8.2-a"
 
     - name: Package boot image
       run: |
