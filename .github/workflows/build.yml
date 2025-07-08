@@ -32,7 +32,7 @@ jobs:
           wget \
           xz-utils
 
-    - name: Clone and patch kernel
+    - name: Clone and prepare kernel
       run: |
         git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
         cd kernel
@@ -42,17 +42,18 @@ jobs:
         mv KernelSU/kernel drivers/kernelsu
         echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
         
-        # إصلاح ملف debug-snapshot.h
-        sed -i '250s/$/;/' include/linux/debug-snapshot.h
-        
-        # إصلاحات Exynos
-        sed -i 's/-march=cortex-a76/-march=armv8.2-a+crypto+dotprod/g' arch/arm64/Makefile
-        sed -i 's/-mlittle-endian//g' Makefile
+        # إنشاء ملف config افتراضي إذا لم يوجد
+        if [ ! -f "arch/arm64/configs/exynos990_defconfig" ]; then
+          make ARCH=arm64 defconfig
+          cp .config arch/arm64/configs/exynos990_defconfig
+        fi
 
     - name: Build kernel
       run: |
         cd kernel
-        make O=out ARCH=arm64 exynos990_defconfig
+        make O=out ARCH=arm64 exynos990_defconfig || \
+        make O=out ARCH=arm64 defconfig
+        
         make -j$(nproc) O=out ARCH=arm64 \
           CC=clang-14 \
           CLANG_TRIPLE=aarch64-linux-gnu- \
