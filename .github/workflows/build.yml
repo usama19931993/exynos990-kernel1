@@ -40,28 +40,34 @@ jobs:
       run: |
         git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
         cd kernel
+        
+        # إصلاح هيكل مجلد GPU إذا كان مفقوداً
+        if [ ! -d "drivers/gpu" ]; then
+          mkdir -p drivers/gpu
+          touch drivers/gpu/Kconfig
+          touch drivers/gpu/Makefile
+        fi
+        
+        # إعداد KernelSU
         git clone --depth=1 https://github.com/tiann/KernelSU.git
         mv KernelSU/kernel drivers/kernelsu
         echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+        
+        # إنشاء مجلد الإخراج
         mkdir -p out
-
-        # إصلاح هيكل مجلد GPU
-        mkdir -p drivers/gpu/arm
-        touch drivers/gpu/arm/Kconfig
-        touch drivers/gpu/arm/Makefile
-        sed -i '/source "drivers\/gpu\/arm\/Kconfig"/d' drivers/gpu/Kconfig
-
-        # إعدادات الفيديو الأساسية
-        echo "config FB_SIMPLE" > drivers/video/fbdev/Kconfig.simple
-        echo "    bool 'Simple framebuffer support'" >> drivers/video/fbdev/Kconfig.simple
-        echo "    depends on FB" >> drivers/video/fbdev/Kconfig.simple
 
     - name: Configure kernel
       run: |
         cd kernel
+        # إنشاء ملف config افتراضي إذا لم يوجد
+        if [ ! -f "arch/arm64/configs/extreme_z3s_defconfig" ]; then
+          make ARCH=arm64 defconfig
+          cp .config arch/arm64/configs/extreme_z3s_defconfig
+        fi
+        
         make O=out ARCH=arm64 extreme_z3s_defconfig
         
-        # تعطيل جميع مشغلات GPU المعقدة
+        # تعطيل مشغلات GPU المسببة للمشاكل
         ./scripts/config --file out/.config \
           --disable CONFIG_MALI_BIFROST \
           --disable CONFIG_DRM \
