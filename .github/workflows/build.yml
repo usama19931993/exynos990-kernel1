@@ -6,6 +6,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      MALI_VERSION: "r38p1"
+      MALI_PLATFORM: "exynos"
 
     steps:
     - name: Checkout
@@ -34,7 +37,6 @@ jobs:
           wget \
           xz-utils
         sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
-        sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
         echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
 
     - name: Clone and prepare kernel
@@ -51,13 +53,21 @@ jobs:
         cd kernel
         make O=out ARCH=arm64 extreme_z3s_defconfig
         
-        # إعدادات GPU المعدلة
+        # إعدادات Mali GPU المعدلة
         ./scripts/config --file out/.config \
-          --set-val CONFIG_MALI_BIFROST y \
-          --set-val CONFIG_MALI_BIFROST_R38P1 n \
-          --set-val CONFIG_MALI_PLATFORM_NAME "exynos"
+          --set-str CONFIG_MALI_PLATFORM_NAME "$MALI_PLATFORM" \
+          --enable CONFIG_MALI_BIFROST \
+          --module CONFIG_MALI_BIFROST \
+          --disable CONFIG_MALI_BIFROST_R38P1
         
         make O=out ARCH=arm64 olddefconfig
+
+    - name: Patch Mali driver
+      run: |
+        cd kernel/drivers/gpu/arm
+        wget https://developer.arm.com/-/media/Files/downloads/mali-drivers/kernel/mali_bifrost_${MALI_VERSION}_patches.tar.gz
+        tar -xzf mali_bifrost_${MALI_VERSION}_patches.tar.gz
+        git apply *.patch || echo "Patches applied with possible offsets"
 
     - name: Build kernel
       run: |
