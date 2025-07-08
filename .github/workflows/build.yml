@@ -47,11 +47,12 @@ jobs:
         echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
         
         # إعداد GPU البديل
+        rm -rf drivers/gpu/arm
         mkdir -p drivers/gpu/dummy
-        echo "obj-y := dummy_gpu.o" > drivers/gpu/dummy/Makefile
+        echo "obj-y := dummy.o" > drivers/gpu/dummy/Makefile
         echo "config DUMMY_GPU" > drivers/gpu/dummy/Kconfig
-        echo "    bool 'Dummy GPU Support'" >> drivers/gpu/dummy/Kconfig
-        echo "    depends on HAS_IOMEM" >> drivers/gpu/dummy/Kconfig
+        echo "    bool 'Simple GPU Support'" >> drivers/gpu/dummy/Kconfig
+        echo "    default y" >> drivers/gpu/dummy/Kconfig
         
         mkdir -p out
 
@@ -70,7 +71,9 @@ jobs:
         # تعديل الإعدادات
         ./scripts/config --file out/.config \
           --disable CONFIG_MALI_BIFROST \
+          --disable CONFIG_MALI_BIFROST_R38P1 \
           --disable CONFIG_DRM \
+          --disable CONFIG_DRM_PANFROST \
           --enable CONFIG_FB \
           --enable CONFIG_FB_SIMPLE \
           --module CONFIG_DUMMY_GPU
