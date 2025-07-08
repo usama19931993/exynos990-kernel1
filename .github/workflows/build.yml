@@ -52,22 +52,29 @@ jobs:
         cd kernel
         make O=out ARCH=arm64 extreme_z3s_defconfig
         
-        # إعدادات Mali GPU المعدلة
+        # إعدادات GPU المعدلة
         ./scripts/config --file out/.config \
           --set-str CONFIG_MALI_PLATFORM_NAME "$MALI_PLATFORM" \
           --enable CONFIG_MALI_BIFROST \
           --module CONFIG_MALI_BIFROST \
-          --disable CONFIG_MALI_BIFROST_R38P1
+          --disable CONFIG_MALI_BIFROST_R38P1 \
+          --disable CONFIG_MALI_BIFROST_DEBUG \
+          --disable CONFIG_MALI_PLATFORM_FAKE
         
         make O=out ARCH=arm64 olddefconfig
 
-    - name: Patch Mali driver manually
+    - name: Patch GPU driver sources
       run: |
         cd kernel/drivers/gpu/arm
-        # حلول بديلة لتصحيحات ARM المفقودة
-        sed -i 's/peak_notify_supported = 1/peak_notify_supported = 0/g' bv_r38p1/*.c 2>/dev/null || true
-        sed -i 's/EXYNOS_PEAK_NOTIFY_SUPPORT/0/g' bv_r38p1/*.h 2>/dev/null || true
-        [ -f "bv_r38p1/Kbuild" ] || touch bv_r38p1/Kbuild
+        # حلول عملية للملفات المسببة للأخطاء
+        [ -f "bv_r38p1/../exynos/workarounds/gpexwa_peak_notify.c" ] || \
+          touch bv_r38p1/../exynos/workarounds/gpexwa_peak_notify.c
+        [ -f "bv_r38p1/../exynos/common/dummy/gpex_debug_dummy.c" ] || \
+          touch bv_r38p1/../exynos/common/dummy/gpex_debug_dummy.c
+        
+        # تعديل ملفات Makefile
+        sed -i '/gpexwa_peak_notify.o/d' bv_r38p1/Makefile
+        sed -i '/gpex_debug_dummy.o/d' bv_r38p1/Makefile
 
     - name: Build kernel
       run: |
@@ -79,7 +86,8 @@ jobs:
           LD=ld.lld-14 \
           LLVM=1 \
           LLVM_IAS=1 \
-          KCFLAGS="-Wno-error -march=armv8.2-a"
+          KCFLAGS="-Wno-error -march=armv8.2-a" \
+          || { echo "Build failed, checking logs"; exit 1; }
 
     - name: Package image
       run: |
