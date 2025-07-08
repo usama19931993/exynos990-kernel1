@@ -7,12 +7,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    env:
-      GH_TOKEN: ${{ secrets.GH_TOKEN }}
-      GH_USERNAME: ${{ secrets.GH_USERNAME }}
-
     steps:
-    - name: Checkout
+    - name: Checkout your kernel repo
       uses: actions/checkout@v4
 
     - name: Clean workspace
@@ -22,32 +18,24 @@ jobs:
       run: |
         sudo apt update
         sudo apt install -y \
-          bc \
-          bison \
-          build-essential \
-          clang-14 \
-          flex \
-          git \
-          libncurses-dev \
-          libssl-dev \
-          lld-14 \
-          llvm-14 \
-          llvm-14-tools \
-          python3 \
-          unzip \
-          wget \
-          xz-utils
+          bc bison build-essential flex git \
+          libncurses-dev libssl-dev \
+          clang-14 lld-14 llvm-14 llvm-14-tools \
+          python3 unzip wget xz-utils
         sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
         sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
         echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
 
-    - name: Clone and prepare kernel
+    - name: Clone Kernel source
       run: |
         git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
+
+    - name: Add KernelSU source
+      env:
+        GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      run: |
         cd kernel
-        git clone --depth=1 https://github.com/KernelSU/KernelSU kernelSU
-        rm -rf kernelSU/.git
-        cp -rvf kernelSU/* .
+        git clone --depth=1 https://${GH_TOKEN}@github.com/KernelSU/KernelSU.git kernelSU
         mkdir -p drivers/kernelsu
         cp -r kernelSU/kernel/* drivers/kernelsu/
         echo 'obj-y += kernelsu/' >> drivers/Makefile
@@ -76,16 +64,13 @@ jobs:
           LLVM_IAS=1 \
           KCFLAGS="-Wno-error -march=armv8.2-a"
 
-    - name: Use original boot.img and repack
+    - name: Generate boot image (optional)
       run: |
         cd kernel
-        mkdir tools
+        mkdir -p tools
         wget https://android.googlesource.com/platform/system/tools/mkbootimg/+/refs/heads/master/mkbootimg.py?format=TEXT -O tools/mkbootimg.b64
         base64 -d tools/mkbootimg.b64 > tools/mkbootimg.py
         chmod +x tools/mkbootimg.py
-
-        # استخراج boot.img من ملف رفعته مسبقًا
-        cp $GITHUB_WORKSPACE/boot.img boot.img
 
         export BASE_ADDR=0x10000000
         export PAGE_SIZE=2048
@@ -95,22 +80,7 @@ jobs:
           --kernel $KERNEL_IMG \
           --base $BASE_ADDR \
           --pagesize $PAGE_SIZE \
-          --output boot.img
+          --output boot.img || true
 
-        tar -cvf boot.tar.md5 boot.img
-
-    - name: Upload release
-      run: |
-        cd kernel
-        RELEASE_TAG="kernel-$(date +%Y%m%d-%H%M)"
-        curl -s -X POST https://api.github.com/repos/${GH_USERNAME}/exynos990-kernel1/releases \
-          -H "Authorization: token ${GH_TOKEN}" \
-          -H "Content-Type: application/json" \
-          -d "{\"tag_name\": \"${RELEASE_TAG}\", \"name\": \"${RELEASE_TAG}\", \"body\": \"Automated Kernel Build\", \"draft\": false, \"prerelease\": false}"
-        
-        UPLOAD_URL=$(curl -s https://api.github.com/repos/${GH_USERNAME}/exynos990-kernel1/releases/tags/${RELEASE_TAG} | jq -r '.upload_url' | sed -e "s/{?name,label}//")
-        
-        curl -s -X POST "$UPLOAD_URL?name=boot.tar.md5" \
-          -H "Authorization: token ${GH_TOKEN}" \
-          -H "Content-Type: application/octet-stream" \
-          --data-binary "@boot.tar.md5"
+        ls -lh boot.img || true
+        tar -cvf boot.tar.md5 boot.img || true
