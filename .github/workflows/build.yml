@@ -41,38 +41,37 @@ jobs:
         git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
         cd kernel
         
-        # إصلاح هيكل مجلد GPU إذا كان مفقوداً
-        if [ ! -d "drivers/gpu" ]; then
-          mkdir -p drivers/gpu
-          touch drivers/gpu/Kconfig
-          touch drivers/gpu/Makefile
-        fi
-        
         # إعداد KernelSU
         git clone --depth=1 https://github.com/tiann/KernelSU.git
         mv KernelSU/kernel drivers/kernelsu
         echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
         
-        # إنشاء مجلد الإخراج
+        # استبدال مشغل GPU المعطّل
+        rm -rf drivers/gpu/arm
+        mkdir -p drivers/gpu/dummy
+        echo "obj-y := dummy_gpu.o" > drivers/gpu/dummy/Makefile
+        echo "config DUMMY_GPU" > drivers/gpu/dummy/Kconfig
+        echo "    bool 'Dummy GPU Support'" >> drivers/gpu/dummy/Kconfig
+        echo "    depends on HAS_IOMEM" >> drivers/gpu/dummy/Kconfig
+        
         mkdir -p out
 
     - name: Configure kernel
       run: |
         cd kernel
-        # إنشاء ملف config افتراضي إذا لم يوجد
-        if [ ! -f "arch/arm64/configs/extreme_z3s_defconfig" ]; then
-          make ARCH=arm64 defconfig
+        [ -f "arch/arm64/configs/extreme_z3s_defconfig" ] || \
+          make ARCH=arm64 defconfig && \
           cp .config arch/arm64/configs/extreme_z3s_defconfig
-        fi
         
         make O=out ARCH=arm64 extreme_z3s_defconfig
         
-        # تعطيل مشغلات GPU المسببة للمشاكل
+        # تعطيل جميع مكونات GPU المعقدة
         ./scripts/config --file out/.config \
           --disable CONFIG_MALI_BIFROST \
           --disable CONFIG_DRM \
           --enable CONFIG_FB \
-          --enable CONFIG_FB_SIMPLE
+          --enable CONFIG_FB_SIMPLE \
+          --module CONFIG_DUMMY_GPU
         
         make O=out ARCH=arm64 olddefconfig
 
