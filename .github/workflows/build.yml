@@ -1,4 +1,4 @@
-name: Build Kernel for SM-G988B (Exynos990)
+name: Build Kernel for SM-G988B (z3s)
 
 on:
   workflow_dispatch:
@@ -14,61 +14,67 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt install -y bc bison build-essential cpio curl flex \
-          git libssl-dev libncurses-dev lz4 python3 unzip wget xz-utils \
-          gcc clang llvm lld libelf-dev device-tree-compiler
-        
-        sudo ln -sf /usr/bin/ld.lld /usr/bin/ld
+        sudo apt install -y \
+          bc bison build-essential cpio curl flex \
+          git libssl-dev libncurses-dev python3 unzip wget \
+          clang-14 llvm-14 lld-14 llvm-14-tools
+        sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
+        sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
         echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
+
+    - name: Download boot.img from release
+      run: |
+        wget -O boot.img https://github.com/usama19931993/exynos990-kernel1/releases/download/bootimg/boot.img
 
     - name: Clone KernelSU
       run: |
-        git clone --depth=1 https://github.com/KernelSU/KernelSU.git
+        git clone --depth=1 https://x-access-token:${{ secrets.GH_TOKEN }}@github.com/KernelSU/KernelSU.git
         mkdir -p drivers/kernelsu
         cp -r KernelSU/kernel/* drivers/kernelsu/
         echo 'obj-y += kernelsu/' >> drivers/Makefile
         echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
 
-    - name: Download original boot.img
-      run: |
-        mkdir boot
-        wget https://github.com/usama19931993/exynos990-kernel1/releases/download/bootimg/boot.img -O boot/boot.img
+    - name: Prepare output directory
+      run: mkdir -p out
 
-    - name: Extract original boot.img
+    - name: Configure kernel
       run: |
-        sudo apt install -y abootimg
-        abootimg -x boot/boot.img
-        mkdir -p out/arch/arm64/boot
-        cp zImage out/arch/arm64/boot/Image
+        make O=out ARCH=arm64 extreme_z3s_defconfig
+        make O=out ARCH=arm64 olddefconfig
 
     - name: Build kernel
       run: |
-        make O=out ARCH=arm64 extreme_z3s_defconfig
-        make -j$(nproc) O=out ARCH=arm64 \
-          CC=clang \
-          LD=ld.lld \
-          LLVM=1 \
-          LLVM_IAS=1 \
-          CROSS_COMPILE=aarch64-linux-gnu-
+        make -j$(nproc) O=out \
+          ARCH=arm64 \
+          CC=clang-14 \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          LD=ld.lld-14 \
+          LLVM=1 LLVM_IAS=1
 
-    - name: Repack boot.img
+    - name: Unpack boot.img
       run: |
-        sudo apt install -y python3-pip
-        pip3 install pybootimg
+        mkdir ramdisk
+        mkdir unpack
+        cd unpack
+        wget https://github.com/pbatard/mkbootimg/releases/download/v1.2.0/unpackbootimg
+        chmod +x unpackbootimg
+        ./unpackbootimg -i ../boot.img
+        cd ..
 
-        mv out/arch/arm64/boot/Image Image
-        pybootimg --create new-boot.img \
-          --kernel Image \
-          --ramdisk initrd.img \
+    - name: Repack boot.img with new kernel
+      run: |
+        cd unpack
+        mkbootimg --kernel ../out/arch/arm64/boot/Image \
+          --ramdisk ../boot.img \
           --base 0x10000000 \
           --pagesize 2048 \
-          --cmdline "$(cat bootimg.cfg | grep cmdline | cut -d= -f2-)"
+          --cmdline "$(cat bootimg-cmdline)" \
+          --second_offset 0x00f00000 \
+          --output ../new-boot.img
 
-        cp new-boot.img boot.img
+    - name: Archive final boot.img
+      run: |
+        mv new-boot.img boot.img
         tar -cvf boot.tar.md5 boot.img
-
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: boot.tar.md5
-        path: boot.tar.md5
+        echo "Created boot.tar.md5 successfully"
