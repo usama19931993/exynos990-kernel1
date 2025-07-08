@@ -17,7 +17,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt install -y bc bison build-essential clang flex git libncurses-dev libssl-dev llvm python3 unzip wget xz-utils
+        sudo apt install -y bc bison build-essential clang-12 flex git libncurses-dev libssl-dev lld-12 python3 unzip wget xz-utils
 
     - name: Clone kernel source
       run: |
@@ -32,25 +32,24 @@ jobs:
     - name: Append KernelSU Kconfig
       run: echo 'source "drivers/kernelsu/Kconfig"' >> kernel/drivers/Kconfig
 
-    - name: Setup toolchain (Fixed Link)
+    - name: Setup Toolchain
       run: |
-        mkdir -p toolchain
-        cd toolchain
-        wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android14-release/clang-r450784d.tar.gz -O clang.tar.gz
-        tar -xzf clang.tar.gz
-        echo "CLANG_PATH=$(pwd)/bin" >> $GITHUB_ENV
-        echo "PATH=$(pwd)/bin:$PATH" >> $GITHUB_ENV
+        echo "CC=clang-12" >> $GITHUB_ENV
+        echo "CLANG_TRIPLE=aarch64-linux-gnu-" >> $GITHUB_ENV
+        echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
+        echo "LD=ld.lld-12" >> $GITHUB_ENV
+        echo "LLVM=1" >> $GITHUB_ENV
 
     - name: Build kernel
       run: |
         cd kernel
         make O=out ARCH=arm64 g988_defconfig
         make -j$(nproc) O=out ARCH=arm64 \
-          CC=clang \
+          CC=clang-12 \
           CLANG_TRIPLE=aarch64-linux-gnu- \
-          CROSS_COMPILE=aarch64-linux-android- \
-          LLVM=1 \
-          LLVM_IAS=1
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          LD=ld.lld-12 \
+          LLVM=1
 
     - name: Create boot image
       run: |
