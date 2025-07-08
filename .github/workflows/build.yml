@@ -46,8 +46,7 @@ jobs:
         mv KernelSU/kernel drivers/kernelsu
         echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
         
-        # استبدال مشغل GPU المعطّل
-        rm -rf drivers/gpu/arm
+        # إعداد GPU البديل
         mkdir -p drivers/gpu/dummy
         echo "obj-y := dummy_gpu.o" > drivers/gpu/dummy/Makefile
         echo "config DUMMY_GPU" > drivers/gpu/dummy/Kconfig
@@ -59,13 +58,16 @@ jobs:
     - name: Configure kernel
       run: |
         cd kernel
-        [ -f "arch/arm64/configs/extreme_z3s_defconfig" ] || \
-          make ARCH=arm64 defconfig && \
+        # إنشاء ملف config إذا لم يكن موجوداً
+        if [ ! -f "arch/arm64/configs/extreme_z3s_defconfig" ]; then
+          make ARCH=arm64 defconfig
+          mkdir -p arch/arm64/configs
           cp .config arch/arm64/configs/extreme_z3s_defconfig
+        fi
+
+        make O=out ARCH=arm64 extreme_z3s_defconfig || make O=out ARCH=arm64 defconfig
         
-        make O=out ARCH=arm64 extreme_z3s_defconfig
-        
-        # تعطيل جميع مكونات GPU المعقدة
+        # تعديل الإعدادات
         ./scripts/config --file out/.config \
           --disable CONFIG_MALI_BIFROST \
           --disable CONFIG_DRM \
