@@ -6,8 +6,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      MALI_PLATFORM: "exynos"
 
     steps:
     - name: Checkout
@@ -47,34 +45,27 @@ jobs:
         echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
         mkdir -p out
 
+    - name: Replace Mali GPU driver
+      run: |
+        cd kernel/drivers/gpu
+        rm -rf arm
+        git clone --depth=1 https://gitlab.freedesktop.org/panfrost/drm.git arm
+        echo 'source "drivers/gpu/arm/Kconfig"' >> ../Kconfig
+
     - name: Configure kernel
       run: |
         cd kernel
         make O=out ARCH=arm64 extreme_z3s_defconfig
         
-        # إعدادات GPU المعدلة
+        # إعدادات GPU الجديدة
         ./scripts/config --file out/.config \
-          --set-str CONFIG_MALI_PLATFORM_NAME "$MALI_PLATFORM" \
-          --enable CONFIG_MALI_BIFROST \
-          --module CONFIG_MALI_BIFROST \
+          --disable CONFIG_MALI_BIFROST \
           --disable CONFIG_MALI_BIFROST_R38P1 \
-          --disable CONFIG_MALI_BIFROST_DEBUG \
-          --disable CONFIG_MALI_PLATFORM_FAKE
+          --enable CONFIG_DRM_PANFROST \
+          --enable CONFIG_DRM_SCHED \
+          --set-val CONFIG_DRM_PANFROST_DEVFREQ y
         
         make O=out ARCH=arm64 olddefconfig
-
-    - name: Patch GPU driver sources
-      run: |
-        cd kernel/drivers/gpu/arm
-        # حلول عملية للملفات المسببة للأخطاء
-        [ -f "bv_r38p1/../exynos/workarounds/gpexwa_peak_notify.c" ] || \
-          touch bv_r38p1/../exynos/workarounds/gpexwa_peak_notify.c
-        [ -f "bv_r38p1/../exynos/common/dummy/gpex_debug_dummy.c" ] || \
-          touch bv_r38p1/../exynos/common/dummy/gpex_debug_dummy.c
-        
-        # تعديل ملفات Makefile
-        sed -i '/gpexwa_peak_notify.o/d' bv_r38p1/Makefile
-        sed -i '/gpex_debug_dummy.o/d' bv_r38p1/Makefile
 
     - name: Build kernel
       run: |
@@ -86,8 +77,7 @@ jobs:
           LD=ld.lld-14 \
           LLVM=1 \
           LLVM_IAS=1 \
-          KCFLAGS="-Wno-error -march=armv8.2-a" \
-          || { echo "Build failed, checking logs"; exit 1; }
+          KCFLAGS="-Wno-error -march=armv8.2-a"
 
     - name: Package image
       run: |
