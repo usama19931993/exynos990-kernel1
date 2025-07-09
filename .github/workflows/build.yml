@@ -1,101 +1,39 @@
-name: Build Kernel for SM-G988B (Exynos990)
+name: Manual Kernel Build Test
 
 on:
   workflow_dispatch:
-    inputs:
-      config_choice:
-        description: 'Choose kernel config file'
-        required: true
-        default: 'stock_defconfig'
-        type: choice
-        options:
-          - stock_defconfig
-          - extreme.config
-          - extreme_c1s_defconfig
-          - extreme_c2s_defconfig
-      clean_build:
-        description: 'Perform clean build?'
-        required: true
-        default: 'true'
-        type: boolean
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
 
     steps:
-    - name: Checkout repository
+    - name: سحب ملفات المشروع
       uses: actions/checkout@v4
 
-    - name: Install dependencies
+    - name: تثبيت أدوات البناء
       run: |
         sudo apt update
-        sudo apt install -y bc bison build-essential ccache curl flex git libncurses-dev libssl-dev python3 unzip wget xz-utils
+        sudo apt install -y clang-14 lld-14 bc bison build-essential curl flex git libncurses-dev libssl-dev python3 unzip wget xz-utils
 
-    - name: Setup environment
+    - name: تنظيف وبناء النواة
       run: |
-        rm -rf kernel toolchain
-        git clone --depth=1 --branch main https://github.com/usama19931993/exynos990-kernel1.git kernel
+        echo "🧹 تنظيف مجلد out/"
+        rm -rf kernel/out
+        mkdir -p kernel/out
+
+        echo "🔨 بدء بناء الكيرنل..."
         cd kernel
-        echo "Available config files:"
-        ls arch/arm64/configs/
-
-    - name: Setup KernelSU
-      run: |
-        cd kernel
-        git submodule add --force https://github.com/tiann/KernelSU.git drivers/kernelsu
-        cd drivers/kernelsu && git submodule update --init && cd ../..
-        echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
-
-    - name: Setup toolchain
-      run: |
-        git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git toolchain
-        echo "$PWD/toolchain/bin" >> $GITHUB_PATH
-        echo "CROSS_COMPILE=$PWD/toolchain/bin/aarch64-linux-android-" >> $GITHUB_ENV
-
-    - name: Build kernel
-      run: |
-        cd kernel
-        if [[ "${{ inputs.clean_build }}" == "true" ]]; then
-          make O=out ARCH=arm64 clean
-          make O=out ARCH=arm64 mrproper
-        fi
-        
-        echo "Using config: ${{ inputs.config_choice }}"
-        cp arch/arm64/configs/${{ inputs.config_choice }} arch/arm64/configs/temp_defconfig
-        echo "CONFIG_KSU=y" >> arch/arm64/configs/temp_defconfig
-        echo "CONFIG_KSU_DEBUG=y" >> arch/arm64/configs/temp_defconfig
-        
-        make O=out ARCH=arm64 temp_defconfig
-        make -j$(($(nproc)*2)) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- CC="ccache aarch64-linux-android-gcc" 2>&1 | tee build.log
-
-    - name: Package boot image
-      run: |
-        cd kernel
-        if [ ! -f "mkbootimg.sh" ]; then
-          cat > mkbootimg.sh <<'EOL'
-#!/bin/bash
-./tools/mkbootimg \
-  --kernel out/arch/arm64/boot/Image \
-  --ramdisk out/ramdisk.cpio \
-  --cmdline "console=ttyS0,115200n8" \
-  --base 0x10000000 \
-  --pagesize 2048 \
-  --os_version 11.0.0 \
-  --os_patch_level 2025-07 \
-  -o boot.img
-EOL
-          chmod +x mkbootimg.sh
-        fi
-        bash ./mkbootimg.sh
-        tar -cvf boot.tar.md5 boot.img
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: kernel-build-${{ github.run_id }}
-        path: |
-          kernel/boot.tar.md5
-          kernel/build.log
-          kernel/out/.config
+        make -j$(nproc) O=out ARCH=arm64 \
+          CC=clang-14 \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          LD=ld.lld-14 \
+          LLVM=1 \
+          LLVM_IAS=1 \
+          KCFLAGS="-Wno-error -march=armv8.2-a" \
+          2>&1 | tee out/build.log || {
+            echo "❌ فشل البناء، آخر 200 سطر:"
+            tail -n 200 out/build.log
+            exit 1
+          }
