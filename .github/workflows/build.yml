@@ -7,11 +7,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      RELEASE_TAG: v1  # ← عدّل إذا كان غير هذا
-      REPO: usama19931993/exynos990-kernel1
-
     steps:
       - name: Checkout Kernel Source
         uses: actions/checkout@v3
@@ -22,16 +17,3 @@ jobs:
           sudo apt install -y git zip unzip curl wget bc bison flex build-essential \
             libssl-dev libncurses5-dev libncursesw5-dev clang python3 python3-pip \
             gcc libc6-dev lib32z1-dev lib32stdc++6
-
-      - name: Download boot-original.zip from GitHub Releases
-        run: |
-          mkdir -p boot-original
-          wget --header="Authorization: token $GITHUB_TOKEN" \
-            -O boot-original/boot.zip \
-            https://github.com/${REPO}/releases/download/${RELEASE_TAG}/boot-original.zip
-
-      - name: Extract and copy boot.img
-        run: |
-          unzip -o boot-original/boot.zip -d boot-original
-          mkdir -p kernel
-          cp boot-original/boot.img kernel/
