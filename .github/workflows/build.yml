@@ -9,20 +9,12 @@ jobs:
 
     steps:
     - name: سحب ملفات المشروع
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: تثبيت المتطلبات
       run: |
-        sudo apt-get update
-        sudo apt-get install -y bc bison flex libssl-dev libncurses5-dev libelf-dev build-essential unzip wget
-
-    - name: إعداد toolchain Android
-      run: |
-        sudo mkdir -p /opt/toolchain
-        wget -q -O aarch64-toolchain.tar.gz https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/heads/master.tar.gz
-        sudo tar -xzf aarch64-toolchain.tar.gz -C /opt/toolchain
-        echo "/opt/toolchain/bin" >> $GITHUB_PATH
-        echo "CROSS_COMPILE=/opt/toolchain/bin/aarch64-linux-android-" >> $GITHUB_ENV
+        sudo apt update
+        sudo apt install -y bc bison build-essential curl flex git libncurses-dev libssl-dev python3 unzip wget xz-utils
 
     - name: استنساخ مصدر النواة إلى مجلد kernel/
       run: |
@@ -31,12 +23,18 @@ jobs:
 
     - name: استنساخ KernelSU ونقلها إلى drivers/kernelsu
       run: |
+        cd kernel
         git clone --depth=1 https://github.com/tiann/KernelSU.git
-        mv KernelSU/kernel/kernelSU kernel/drivers/kernelsu
+        mv KernelSU/kernel drivers/kernelsu
 
-    - name: ربط Kconfig الخاصة بـ KernelSU بـ Kconfig العام
+    - name: ربط Kconfig الخاصة بـ KernelSU مع Kconfig العام
+      run: echo 'source "drivers/kernelsu/Kconfig"' >> kernel/drivers/Kconfig
+
+    - name: إعداد toolchain Android
       run: |
-        echo 'source "drivers/kernelsu/Kconfig"' >> kernel/drivers/Kconfig
+        git clone --depth=1 https://github.com/bgcngm/aarch64-linux-android-4.9.git toolchain
+        echo "$PWD/toolchain/bin" >> $GITHUB_PATH
+        echo "CROSS_COMPILE=$PWD/toolchain/bin/aarch64-linux-android-" >> $GITHUB_ENV
 
     - name: بناء النواة
       run: |
@@ -44,30 +42,8 @@ jobs:
         make O=out ARCH=arm64 g988_defconfig
         make -j$(nproc) O=out ARCH=arm64
 
-    - name: تحميل boot-original.zip من GitHub Releases
-      run: |
-        wget -O boot-original.zip https://github.com/usama19931993/exynos990-kernel1/releases/download/boot-source/boot-original.zip
-        unzip -o boot-original.zip -d boot-source
-
-    - name: استبدال الكيرنل داخل boot.img
+    - name: تغليف boot.img إلى boot.tar.md5
       run: |
         cd kernel
-        wget -O magiskboot https://github.com/topjohnwu/magisk/releases/download/v26.4/magiskboot
-        chmod +x magiskboot
-        cp ../boot-source/boot.img .
-        ./magiskboot unpack boot.img
-        cp out/arch/arm64/boot/Image kernel
-        ./magiskboot repack boot.img
-        mv new-boot.img ../boot_patched.img
-
-    - name: تغليف boot_patched.img إلى boot.tar.md5
-      run: |
-        tar -H ustar -c -f boot.tar boot_patched.img
-        md5sum -t boot.tar >> boot.tar
-        mv boot.tar boot.tar.md5
-
-    - name: رفع boot.tar.md5 إلى Artifacts
-      uses: actions/upload-artifact@v3
-      with:
-        name: boot-patched
-        path: boot.tar.md5
+        bash ./mkbootimg.sh
+        tar -cvf boot.tar.md5 boot.img
