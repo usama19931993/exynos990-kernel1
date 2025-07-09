@@ -1,21 +1,31 @@
-- name: 🟢 تشغيل السكربت
-  run: echo "بدأ تنفيذ السكربت..."
+name: Build Kernel
 
-- name: 🔻 تحميل ملف البوت الأصلي
-  run: |
-    mkdir -p boot-original
-    wget --header="Authorization: token ${{ secrets.GH_TOKEN }}" \
-      -O boot-original/boot.zip \
-      https://github.com/usama19931993/exynos990-kernel1/releases/download/boot-original/boot-original.zip
-    unzip -o boot-original/boot.zip -d boot-original
-    cp boot-original/boot.img kernel/
+on:
+  push:
+    branches:
+      - main
 
-- name: 🔧 دمج KernelSU مع الكيرنل
-  run: |
-    git clone --depth=1 -b main https://github.com/KernelSU/KernelSU kernel/kernelSU
-    cd kernel
-    KERNEL_SOURCE=$(pwd)
-    KSU_DIR=$KERNEL_SOURCE/kernelSU
-    echo "Kernel source: $KERNEL_SOURCE"
-    echo "KernelSU dir: $KSU_DIR"
-    bash $KSU_DIR/scripts/merge.sh $KERNEL_SOURCE
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🟢 بدء تنفيذ السكربت
+        run: echo "✅ بدأ تنفيذ سكربت البناء..."
+
+      - name: 🔻 تحميل ملف البوت الأصلي
+        run: |
+          mkdir -p boot-original
+          wget --header="Authorization: token ${{ secrets.GH_TOKEN }}" \
+            -O boot-original/boot.zip \
+            https://github.com/usama19931993/exynos990-kernel1/releases/download/boot-original/boot-original.zip
+          unzip -o boot-original/boot.zip -d boot-original
+          cp boot-original/boot.img kernel/
+
+      - name: 🔧 دمج KernelSU مع الكيرنل
+        run: |
+          git clone --depth=1 -b main https://github.com/KernelSU/KernelSU kernel/kernelSU
+          cd kernel
+          KERNEL_SOURCE=$(pwd)
+          KSU_DIR=$KERNEL_SOURCE/kernelSU
+          bash $KSU_DIR/scripts/merge.sh $KERNEL_SOURCE
