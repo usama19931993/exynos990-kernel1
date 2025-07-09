@@ -1,7 +1,14 @@
+
+
 name: Build Kernel for SM-G988B (Exynos990)
 
 on:
-  workflow_dispatch:
+workflow_dispatch:
+
+jobs:
+build:
+runs-on: ubuntu-latest
+timeout-minutes: 90  # 
 - name: Configure kernel
       run: |
         cd kernel
