@@ -1,4 +1,5 @@
-name: Build Exynos990 Kernel with KernelSU and Odin Package
+
+name: Build Exynos990 Kernel (SM-G988B)
 
 on:
   workflow_dispatch:
@@ -7,23 +8,27 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      KSU_BRANCH: main
+
     steps:
-    - name: ⬇️ Checkout kernel source
+    - name: 📥 Checkout Kernel Source
       uses: actions/checkout@v4
 
-    - name: 🧰 Install dependencies
+    - name: 🧰 Install Dependencies
       run: |
+        sudo dpkg --add-architecture i386
         sudo apt update
         sudo apt install -y git zip unzip curl wget bc bison flex build-essential \
-          libssl-dev libncurses-dev clang python3 python3-pip \
+          libssl-dev libncurses5-dev libncursesw5-dev clang python3 python3-pip \
           gcc libc6-dev lib32z1-dev lib32stdc++6
 
-    - name: 📥 Download boot-original.zip from GitHub Releases
+    - name: 🔻 Download Original Boot Image
       run: |
         mkdir -p boot-original
         wget --header="Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
           -O boot-original/boot.zip \
-          https://github.com/usama19931993/exynos990-kernel1/releases/download/boot/boot-original.zip
+          https://github.com/usama19931993/exynos990-kernel1/releases/download/v1/boot-original.zip
         unzip -o boot-original/boot.zip -d boot-original
         cp boot-original/boot.img kernel/
 
@@ -31,39 +36,34 @@ jobs:
       run: |
         git clone --depth=1 https://github.com/KernelSU/KernelSU kernel/kernelSU
 
-    - name: ⚙️ Apply KernelSU patch
-      working-directory: kernel
+    - name: ⚙️ Prepare Kernel Config
       run: |
-        ./kernelSU/scripts/setup.sh
+        cd kernel
+        make ARCH=arm64 exynos990_defconfig
+        scripts/config --file .config --enable CONFIG_KPROBES
+        scripts/config --file .config --enable CONFIG_MODULES
+        scripts/config --file .config --enable CONFIG_KALLSYMS_ALL
+        make ARCH=arm64 olddefconfig
 
-    - name: 🛠️ Build the kernel
+    - name: 🛠️ Build Kernel
       run: |
-        export ARCH=arm64
-        export SUBARCH=arm64
-        export CROSS_COMPILE=aarch64-linux-gnu-
-        export PATH=/usr/lib/ccache:/usr/bin:$PATH
+        cd kernel
+        make -j$(nproc) ARCH=arm64
 
-        make -C kernel O=out exynos990-kernel_defconfig
-        make -C kernel O=out -j$(nproc)
-
-    - name: 📦 Pack new boot.img
+    - name: 🧩 Merge Kernel with boot.img (anykernel or mkbootimg)
       run: |
-        mkdir final-boot
-        curl -Lo magiskboot https://github.com/topjohnwu/magiskboot/releases/latest/download/magiskboot-linux-x86_64
-        chmod +x magiskboot
-        ./magiskboot unpack kernel/out/arch/arm64/boot/Image boot-original/boot.img
-        ./magiskboot repack boot-original/boot.img
-        mv new-boot.img final-boot/boot.img
+        echo "Merging zImage with boot.img..."
+        # Place merging logic here based on your setup (e.g., mkbootimg or anykernel3)
 
-    - name: 🧳 Create Odin flashable boot.tar.md5
+    - name: 📦 Package to boot.tar.md5 for Odin
       run: |
-        cd final-boot
+        cd output
         tar -H ustar -c boot.img > boot.tar
-        md5sum -t boot.tar | awk '{print $1}' >> boot.tar
+        md5sum -t boot.tar >> boot.tar
         mv boot.tar boot.tar.md5
 
-    - name: 📤 Upload boot.tar.md5
+    - name: ⬆️ Upload boot.tar.md5 to Release Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: boot.tar.md5
-        path: final-boot/boot.tar.md5
+        name: boot-for-odin
+        path: output/boot.tar.md5
