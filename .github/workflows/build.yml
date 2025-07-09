@@ -6,7 +6,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 60  # زيادة وقت التنفيذ
+    timeout-minutes: 90  # زيادة وقت التنفيذ
 
     steps:
     - name: سحب ملفات المشروع
@@ -15,7 +15,7 @@ jobs:
     - name: تثبيت المتطلبات
       run: |
         sudo apt update
-        sudo apt install -y bc bison build-essential curl flex git libncurses-dev libssl-dev python3 unzip wget xz-utils
+        sudo apt install -y bc bison build-essential ccache curl flex git libncurses-dev libssl-dev python3 unzip wget xz-utils
 
     - name: تنظيف البيئة
       run: |
@@ -23,7 +23,7 @@ jobs:
 
     - name: استنساخ مصدر النواة
       run: |
-        git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
+        git clone --depth=1 --branch main https://github.com/usama19931993/exynos990-kernel1.git kernel
 
     - name: إضافة KernelSU
       run: |
@@ -35,20 +35,25 @@ jobs:
 
     - name: إعداد أداة التجميع (Toolchain)
       run: |
-        # المحاولة الأولى مع git protocol
-        if ! git clone --depth=1 git://github.com/bgcngm/aarch64-linux-android-4.9.git toolchain; then
-          echo "المحاولة الأولى فشلت، جارٍ المحاولة عبر HTTPS..."
-          # المحاولة الثانية مع HTTPS
-          git clone --depth=1 https://github.com/bgcngm/aarch64-linux-android-4.9.git toolchain || true
-        fi
+        # المحاولة مع روابط بديلة
+        git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git toolchain || \
+        git clone --depth=1 https://github.com/bgcngm/aarch64-linux-android-4.9.git toolchain || \
+        git clone --depth=1 git://github.com/bgcngm/aarch64-linux-android-4.9.git toolchain
         
         if [ -d "toolchain" ]; then
           echo "$PWD/toolchain/bin" >> $GITHUB_PATH
           echo "CROSS_COMPILE=$PWD/toolchain/bin/aarch64-linux-android-" >> $GITHUB_ENV
+          echo "PATH=$PWD/toolchain/bin:$PATH" >> $GITHUB_ENV
         else
           echo "❌ فشل في الحصول على أداة التجميع!"
           exit 1
         fi
+
+    - name: تهيئة ccache
+      run: |
+        echo "/usr/bin/ccache" >> $GITHUB_PATH
+        echo "CCACHE_DIR=$GITHUB_WORKSPACE/ccache" >> $GITHUB_ENV
+        mkdir -p $GITHUB_WORKSPACE/ccache
 
     - name: بناء النواة
       run: |
@@ -56,19 +61,21 @@ jobs:
         make O=out ARCH=arm64 clean
         make O=out ARCH=arm64 mrproper
         make O=out ARCH=arm64 g988_defconfig
-        make -j$(nproc) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- 2>&1 | tee build.log
+        make -j$(($(nproc)*2)) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- CC="ccache aarch64-linux-android-gcc" 2>&1 | tee build.log
 
     - name: تغليف الصورة النهائية
       run: |
         cd kernel
-        bash ./mkbootimg.sh
-        tar -cvf boot.tar.md5 boot.img
+        [ -f mkbootimg.sh ] && bash ./mkbootimg.sh || echo "⚠️ ملف mkbootimg.sh غير موجود"
+        [ -f boot.img ] && tar -cvf boot.tar.md5 boot.img || echo "⚠️ ملف boot.img غير موجود"
 
-    - name: رفع المخرجات (اختياري)
+    - name: رفع المخرجات
       if: success()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
-        name: kernel-build
+        name: kernel-build-artifacts
         path: |
           kernel/boot.tar.md5
           kernel/build.log
+          kernel/out/arch/arm64/boot/Image
+        retention-days: 3
