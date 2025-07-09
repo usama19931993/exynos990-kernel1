@@ -1,4 +1,3 @@
-
 name: Build Kernel for SM-G988B (Exynos990)
 
 on:
@@ -17,9 +16,12 @@ jobs:
         sudo apt update
         sudo apt install -y bc bison build-essential curl flex git libncurses-dev libssl-dev python3 unzip wget xz-utils
 
+    - name: تنظيف البيئة (إن وجدت)
+      run: |
+        rm -rf kernel toolchain
+
     - name: استنساخ مصدر النواة إلى مجلد kernel/
       run: |
-        rm -rf kernel
         git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
 
     - name: استنساخ KernelSU ونقلها إلى drivers/kernelsu
@@ -27,9 +29,12 @@ jobs:
         cd kernel
         git clone --depth=1 https://github.com/tiann/KernelSU.git
         mv KernelSU/kernel drivers/kernelsu
+        rm -rf KernelSU
 
     - name: ربط Kconfig الخاصة بـ KernelSU مع Kconfig العام
-      run: echo 'source "drivers/kernelsu/Kconfig"' >> kernel/drivers/Kconfig
+      run: |
+        cd kernel
+        echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
 
     - name: إعداد toolchain Android
       run: |
@@ -37,11 +42,13 @@ jobs:
         echo "$PWD/toolchain/bin" >> $GITHUB_PATH
         echo "CROSS_COMPILE=$PWD/toolchain/bin/aarch64-linux-android-" >> $GITHUB_ENV
 
-    - name: بناء النواة
+    - name: تنظيف وبناء النواة
       run: |
         cd kernel
+        make O=out ARCH=arm64 clean
+        make O=out ARCH=arm64 mrproper
         make O=out ARCH=arm64 g988_defconfig
-        make -j$(nproc) O=out ARCH=arm64
+        make -j$(nproc) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-android-
 
     - name: تغليف boot.img إلى boot.tar.md5
       run: |
