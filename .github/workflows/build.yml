@@ -3,8 +3,7 @@ name: Build Kernel for SM-G988B (Exynos990)
 on:
   workflow_dispatch:
 
-
-    - name: Configure kernel
+- name: Configure kernel
       run: |
         cd kernel
         make O=out ARCH=arm64 extreme_z3s_defconfig
