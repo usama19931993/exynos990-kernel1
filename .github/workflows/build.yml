@@ -61,7 +61,7 @@ jobs:
           --set-val CONFIG_MALI_PLATFORM_NAME "exynos"
         make O=out ARCH=arm64 olddefconfig
 
-    - name: Build kernel
+    - name: Build kernel with logging
       run: |
         cd kernel
         make -j$(nproc) O=out ARCH=arm64 \
@@ -72,7 +72,8 @@ jobs:
           LLVM=1 \
           LLVM_IAS=1 \
           KCFLAGS="-Wno-error -march=armv8.2-a" \
-          V=1
+          V=1 \
+          2>&1 | tee ../build.log || (echo "❌ Build failed. Showing last 200 lines:" && tail -n 200 ../build.log && exit 1)
 
     - name: Package boot image
       run: |
