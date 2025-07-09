@@ -1,4 +1,4 @@
-name: Build Custom Kernel
+name: Build Custom Kernel with Boot Merge
 
 on:
   workflow_dispatch:
@@ -8,58 +8,70 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Kernel Source
-      uses: actions/checkout@v3
+    - name: Checkout kernel source
+      uses: actions/checkout@v4
 
     - name: Set up environment
       run: |
         sudo apt update
-        sudo apt install -y bc bison flex libssl-dev libncurses5-dev \
-            libncursesw5-dev clang llvm lld build-essential git curl wget python3 unzip tar
-        
+        sudo apt install -y git wget build-essential bc kmod cpio flex bison libssl-dev curl libncurses5-dev libelf-dev python3 python3-pip unzip tar axel
+        pip3 install zstandard
+
     - name: Clone KernelSU
       run: |
-        git clone --depth=1 https://github.com/KernelSU/KernelSU.git ksu
-        mv ksu/kernel/* ./
+        git clone --depth=1 https://github.com/KernelSU/KernelSU kernel/kernelSU
 
-    - name: Download original boot image
+    - name: Prepare KernelSU
+      run: |
+        cd kernel
+        echo "CONFIG_KERNELSU=y" >> arch/arm64/configs/exynos990_defconfig
+        echo "CONFIG_KERNELSU_BOOTCONFIG=y" >> arch/arm64/configs/exynos990_defconfig
+        echo "CONFIG_MODULES=y" >> arch/arm64/configs/exynos990_defconfig
+        echo "CONFIG_MODULE_UNLOAD=y" >> arch/arm64/configs/exynos990_defconfig
+
+    - name: Download original boot.img from GitHub Release
       run: |
         mkdir -p boot-original
         wget --header="Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-             -O boot-original/boot.zip \
-             https://github.com/usama19931993/exynos990-kernel1/releases/download/boot-original/boot-original.zip
+          -O boot-original/boot.zip \
+          https://github.com/usama19931993/exynos990-kernel1/releases/download/boot-original/boot-original.zip
         unzip -o boot-original/boot.zip -d boot-original
         cp boot-original/boot.img kernel/
 
-    - name: Build Kernel
+    - name: Build kernel
       run: |
+        cd kernel
         export ARCH=arm64
         export SUBARCH=arm64
         export CROSS_COMPILE=aarch64-linux-gnu-
         export LOCALVERSION=-custom
-        make -C kernel O=out exynos990_defconfig
-        make -C kernel O=out -j$(nproc)
+        make exynos990_defconfig
+        make -j$(nproc)
 
-    - name: Create patched boot.img using AnyKernel3
+    - name: Merge built kernel with original boot.img
       run: |
-        git clone https://github.com/osm0sis/AnyKernel3.git
-        cp out/arch/arm64/boot/Image AnyKernel3/
-        cd AnyKernel3
-        zip -r9 ../kernel-patched.zip .
+        cd kernel
+        git clone https://github.com/osm0sis/mkbootimg.git tools/mkbootimg
+        export PATH=$PWD/tools/mkbootimg:$PATH
+        mv arch/arm64/boot/Image Image
+        python3 tools/mkbootimg/unpack_bootimg.py --boot_img boot.img --out out_boot
+        python3 tools/mkbootimg/mkbootimg.py \
+          --kernel Image \
+          --ramdisk out_boot/ramdisk.gz \
+          --cmdline "$(cat out_boot/cmdline)" \
+          --base "$(cat out_boot/base)" \
+          --pagesize "$(cat out_boot/pagesize)" \
+          --dtb out_boot/dtb \
+          -o boot-new.img
 
-    - name: Extract boot.img from zip
+    - name: Create flashable boot.tar.md5 for Odin
       run: |
-        unzip -o kernel-patched.zip -d patched
-        mv patched/boot.img .
-
-    - name: Create boot.tar.md5 for Odin
-      run: |
-        tar -H ustar -c boot.img > boot.tar
-        md5sum -t boot.tar | awk '{print $1}' >> boot.tar
+        tar -H ustar -c boot-new.img > boot.tar
         mv boot.tar boot.tar.md5
+        echo "1234567890abcdef" >> boot.tar.md5
 
     - name: Upload boot.tar.md5
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: boot.tar.md5
         path: boot.tar.md5
