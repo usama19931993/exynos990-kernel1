@@ -1,4 +1,4 @@
-name: Build Kernel for SM-G988B (Exynos990) with KernelSU
+name: Build Kernel for SM-G988B (Exynos990)
 
 on:
   workflow_dispatch:
@@ -8,16 +8,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # سحب ملفات الريبو الرئيسي
-    - name: Checkout repo
+    - name: Checkout
       uses: actions/checkout@v4
 
-    # تنظيف مجلد العمل من أي بناء سابق
     - name: Clean workspace
-      run: |
-        rm -rf kernel KernelSU boot-original boot-original.zip
+      run: rm -rf kernel
 
-    # تثبيت الأدوات والاعتماديات اللازمة للبناء
     - name: Install toolchain
       run: |
         sudo apt update
@@ -41,46 +37,28 @@ jobs:
         sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
         echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
 
-    # تحميل ملف boot-original.zip من صفحة الريليس الخاصة بك
-    - name: Download original boot.img from GitHub Releases
-      run: |
-        curl -L -H "Authorization: token ${{ secrets.GH_TOKEN }}" \
-          -o boot-original.zip \
-          https://github.com/usama19931993/exynos990-kernel1/releases/download/boot-original/boot-original.zip
-
-    # فك الضغط واستخراج boot.img
-    - name: Extract boot.img
-      run: |
-        unzip boot-original.zip -d boot-original
-        ls -lh boot-original
-        test -f boot-original/boot.img || (echo "boot.img not found!" && exit 1)
-
-    # استنساخ كود الكيرنل ودمج KernelSU ونسخ boot.img
-    - name: Clone and prepare kernel source
+    - name: Clone and prepare kernel
       run: |
         git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
         cd kernel
         git clone --depth=1 https://github.com/tiann/KernelSU.git
         mv KernelSU/kernel drivers/kernelsu
         echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
-        cp ../boot-original/boot.img .
         mkdir -p out
 
-    # تجهيز الإعدادات الأولية للكيرنل (defconfig)
     - name: Configure kernel
       run: |
         cd kernel
         make O=out ARCH=arm64 extreme_z3s_defconfig
-
-        # تعديل إعدادات GPU
+        
+        # إعدادات GPU المعدلة
         ./scripts/config --file out/.config \
           --set-val CONFIG_MALI_BIFROST y \
           --set-val CONFIG_MALI_BIFROST_R38P1 n \
           --set-val CONFIG_MALI_PLATFORM_NAME "exynos"
-
+        
         make O=out ARCH=arm64 olddefconfig
 
-    # بناء الكيرنل باستخدام Clang + LLVM
     - name: Build kernel
       run: |
         cd kernel
@@ -93,23 +71,8 @@ jobs:
           LLVM_IAS=1 \
           KCFLAGS="-Wno-error -march=armv8.2-a"
 
-    # إنشاء boot.img باستخدام سكربت mkbootimg.sh
-    - name: Package boot.img
+    - name: Package image
       run: |
         cd kernel
         bash ./mkbootimg.sh
-
-    # إنشاء ملف boot.tar.md5 القابل للفلاش عبر Odin
-    - name: Create Odin flashable boot.tar.md5
-      run: |
-        cd kernel
-        tar -H ustar -c boot.img > boot.tar
-        md5sum -t boot.tar | cut -d ' ' -f1 >> boot.tar
-        mv boot.tar boot.tar.md5
-
-    # رفع النتيجة كـ artifact لتسهيل التحميل
-    - name: Upload boot.tar.md5
-      uses: actions/upload-artifact@v4
-      with:
-        name: boot.tar.md5
-        path: kernel/boot.tar.md5
+        tar -cvf boot.tar.md5 boot.img
