@@ -8,42 +8,70 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout dummy repo
+    - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Install dependencies
+    - name: Clean workspace
+      run: rm -rf kernel
+
+    - name: Install toolchain
       run: |
         sudo apt update
-        sudo apt install -y bc bison build-essential curl flex git libncurses-dev libssl-dev python3 unzip wget xz-utils
+        sudo apt install -y \
+          bc \
+          bison \
+          build-essential \
+          clang-14 \
+          flex \
+          git \
+          libncurses-dev \
+          libssl-dev \
+          lld-14 \
+          llvm-14 \
+          llvm-14-tools \
+          python3 \
+          unzip \
+          wget \
+          xz-utils
+        sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
+        sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
+        echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
 
-    - name: Clone kernel source into kernel/ folder
-      run: git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
-
-    - name: Clone KernelSU and move into drivers/kernelsu
+    - name: Clone and prepare kernel
       run: |
+        git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
         cd kernel
         git clone --depth=1 https://github.com/tiann/KernelSU.git
         mv KernelSU/kernel drivers/kernelsu
+        echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+        mkdir -p out
 
-    - name: Append KernelSU Kconfig to drivers/Kconfig
-      run: echo 'source "drivers/kernelsu/Kconfig"' >> kernel/drivers/Kconfig
-
-    - name: Download and extract proper toolchain
-      run: |
-        mkdir -p toolchain
-        cd toolchain
-        wget https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/heads/master.tar.gz -O toolchain.tar.gz
-        tar -xzf toolchain.tar.gz
-        echo "CROSS_COMPILE=$(pwd)/aarch64-linux-android-" >> $GITHUB_ENV
-        echo "PATH=$(pwd):$PATH" >> $GITHUB_ENV
-
-    - name: Build the kernel
+    - name: Configure kernel
       run: |
         cd kernel
-        make O=out ARCH=arm64 g988_defconfig
-        make -j$(nproc) O=out ARCH=arm64
+        make O=out ARCH=arm64 extreme_z3s_defconfig
+        
+        # إعدادات GPU المعدلة
+        ./scripts/config --file out/.config \
+          --set-val CONFIG_MALI_BIFROST y \
+          --set-val CONFIG_MALI_BIFROST_R38P1 n \
+          --set-val CONFIG_MALI_PLATFORM_NAME "exynos"
+        
+        make O=out ARCH=arm64 olddefconfig
 
-    - name: Pack boot.img into boot.tar.md5
+    - name: Build kernel
+      run: |
+        cd kernel
+        make -j$(nproc) O=out ARCH=arm64 \
+          CC=clang-14 \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          LD=ld.lld-14 \
+          LLVM=1 \
+          LLVM_IAS=1 \
+          KCFLAGS="-Wno-error -march=armv8.2-a"
+
+    - name: Package image
       run: |
         cd kernel
         bash ./mkbootimg.sh
