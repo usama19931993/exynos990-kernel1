@@ -70,7 +70,11 @@ jobs:
 
     - name: Download and setup magiskboot (official stable)
       run: |
-        wget https://github.com/topjohnwu/magisk/releases/download/v26.3/magiskboot -O magiskboot
+        # استبدال الرابط القديم بأحدث إصدار من Magisk
+        LATEST_MAGISK=$(curl -s https://api.github.com/repos/topjohnwu/Magisk/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+        wget https://github.com/topjohnwu/Magisk/releases/download/$LATEST_MAGISK/magiskboot -O magiskboot || \
+          (echo "⚠️ Failed to download magiskboot, trying fallback URL..." && \
+           wget https://github.com/topjohnwu/Magisk/releases/download/v27.0/magiskboot -O magiskboot)
         chmod +x magiskboot
 
     - name: Repack boot.img with new kernel
@@ -91,5 +95,6 @@ jobs:
         body: |
           ✅ Built and repacked for SM-G988B (Exynos990) with KernelSU
           🔧 Ready for flashing via Odin.
+          🔄 Magiskboot version: $LATEST_MAGISK
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
