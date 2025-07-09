@@ -1,91 +1,69 @@
-GitHub Actions workflow for building Exynos990 kernel with KernelSU
+name: Build Exynos990 Kernel with KernelSU and Odin Package
 
-name: Build Exynos990 Kernel with KernelSU
+on:
+  workflow_dispatch:
 
-on: workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
 
-jobs: build: runs-on: ubuntu-latest name: Compile Kernel and Package steps:
+    steps:
+    - name: ⬇️ Checkout kernel source
+      uses: actions/checkout@v4
 
-- name: Set up job
-  run: echo "Starting Kernel Build Job"
+    - name: 🧰 Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y git zip unzip curl wget bc bison flex build-essential \
+          libssl-dev libncurses-dev clang python3 python3-pip \
+          gcc libc6-dev lib32z1-dev lib32stdc++6
 
-- name: Checkout source
-  uses: actions/checkout@v4
+    - name: 📥 Download boot-original.zip from GitHub Releases
+      run: |
+        mkdir -p boot-original
+        wget --header="Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          -O boot-original/boot.zip \
+          https://github.com/usama19931993/exynos990-kernel1/releases/download/boot/boot-original.zip
+        unzip -o boot-original/boot.zip -d boot-original
+        cp boot-original/boot.img kernel/
 
-- name: Install dependencies
-  run: |
-    sudo apt update
-    sudo apt install -y \
-      git zip unzip curl wget bc bison flex build-essential \
-      libssl-dev libncurses5-dev libncursesw5-dev clang python3 python3-pip \
-      gcc libc6-dev lib32z1-dev lib32stdc++6 openssl rsync
+    - name: 🔁 Clone KernelSU
+      run: |
+        git clone --depth=1 https://github.com/KernelSU/KernelSU kernel/kernelSU
 
-- name: Clone toolchain
-  run: |
-    git clone --depth=1 https://github.com/mvaisakh/gcc-arm64.git -b master gcc64
-    git clone --depth=1 https://github.com/mvaisakh/gcc-arm.git -b master gcc32
+    - name: ⚙️ Apply KernelSU patch
+      working-directory: kernel
+      run: |
+        ./kernelSU/scripts/setup.sh
 
-- name: Export environment variables
-  run: |
-    echo "KERNEL_DIR=$(pwd)" >> $GITHUB_ENV
-    echo "ARCH=arm64" >> $GITHUB_ENV
-    echo "SUBARCH=arm64" >> $GITHUB_ENV
-    echo "CROSS_COMPILE=$(pwd)/gcc32/bin/arm-eabi-" >> $GITHUB_ENV
-    echo "CROSS_COMPILE_ARM32=$(pwd)/gcc32/bin/arm-eabi-" >> $GITHUB_ENV
-    echo "CROSS_COMPILE64=$(pwd)/gcc64/bin/aarch64-elf-" >> $GITHUB_ENV
+    - name: 🛠️ Build the kernel
+      run: |
+        export ARCH=arm64
+        export SUBARCH=arm64
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export PATH=/usr/lib/ccache:/usr/bin:$PATH
 
-- name: Clone KernelSU
-  run: |
-    git clone --depth=1 https://github.com/tiann/KernelSU.git -b main KernelSU
+        make -C kernel O=out exynos990-kernel_defconfig
+        make -C kernel O=out -j$(nproc)
 
-- name: Prepare KernelSU
-  run: |
-    cd ${{ env.KERNEL_DIR }}
-    echo "CONFIG_KSU=y" >> arch/arm64/configs/exynos990_defconfig
-    KSU_PATCHES_DIR=KernelSU/kernel
-    bash $KSU_PATCHES_DIR/setup.sh
+    - name: 📦 Pack new boot.img
+      run: |
+        mkdir final-boot
+        curl -Lo magiskboot https://github.com/topjohnwu/magiskboot/releases/latest/download/magiskboot-linux-x86_64
+        chmod +x magiskboot
+        ./magiskboot unpack kernel/out/arch/arm64/boot/Image boot-original/boot.img
+        ./magiskboot repack boot-original/boot.img
+        mv new-boot.img final-boot/boot.img
 
-- name: Download original boot image
-  run: |
-    mkdir -p boot-original
-    wget -O boot-original/boot.zip \
-      https://github.com/usama19931993/exynos990-kernel1/releases/download/boot-original/boot-original.zip
-    unzip -o boot-original/boot.zip -d boot-original
+    - name: 🧳 Create Odin flashable boot.tar.md5
+      run: |
+        cd final-boot
+        tar -H ustar -c boot.img > boot.tar
+        md5sum -t boot.tar | awk '{print $1}' >> boot.tar
+        mv boot.tar boot.tar.md5
 
-- name: Build Kernel
-  run: |
-    export PATH=$(pwd)/gcc64/bin:$(pwd)/gcc32/bin:$PATH
-    make O=out ARCH=arm64 exynos990_defconfig
-    make -j$(nproc) O=out ARCH=arm64 \
-      CROSS_COMPILE=aarch64-elf- \
-      CROSS_COMPILE_ARM32=arm-eabi-
-
-- name: Copy Image to anykernel
-  run: |
-    mkdir -p anykernel
-    cp out/arch/arm64/boot/Image anykernel/
-
-- name: Merge with original boot.img
-  run: |
-    cd anykernel
-    wget https://github.com/osm0sis/mkbootimg/archive/refs/heads/master.zip -O mkbootimg.zip
-    unzip mkbootimg.zip
-    export PATH=$PATH:$(pwd)/mkbootimg-master
-    python3 mkbootimg-master/unpackbootimg.py --boot_img ../boot-original/boot.img --out .
-    python3 mkbootimg-master/mkbootimg.py --kernel Image \
-      --ramdisk ramdisk --dtb dtb --cmdline "$(cat cmdline)" \
-      --base $(cat base) --pagesize $(cat pagesize) \
-      -o boot-new.img
-
-- name: Package for Odin (boot.tar.md5)
-  run: |
-    tar -H ustar -c boot-new.img > boot.tar
-    md5sum -t boot.tar >> boot.tar
-    mv boot.tar boot.tar.md5
-
-- name: Upload boot.tar.md5
-  uses: actions/upload-artifact@v4
-  with:
-    name: boot.tar.md5
-    path: boot.tar.md5
-
+    - name: 📤 Upload boot.tar.md5
+      uses: actions/upload-artifact@v4
+      with:
+        name: boot.tar.md5
+        path: final-boot/boot.tar.md5
