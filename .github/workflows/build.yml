@@ -1,3 +1,6 @@
+- name: 🟢 تشغيل السكربت
+  run: echo "بدأ تنفيذ السكربت..."
+
 - name: 🔻 تحميل ملف البوت الأصلي
   run: |
     mkdir -p boot-original
@@ -15,5 +18,4 @@
     KSU_DIR=$KERNEL_SOURCE/kernelSU
     echo "Kernel source: $KERNEL_SOURCE"
     echo "KernelSU dir: $KSU_DIR"
-    # دمج KernelSU مع الكود الأساسي
     bash $KSU_DIR/scripts/merge.sh $KERNEL_SOURCE
