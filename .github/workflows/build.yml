@@ -2,6 +2,22 @@ name: Build Kernel for SM-G988B (Exynos990)
 
 on:
   workflow_dispatch:
+    inputs:
+      config_choice:
+        description: 'Choose kernel config file'
+        required: true
+        default: 'stock_defconfig'
+        type: choice
+        options:
+          - stock_defconfig
+          - extreme.config
+          - extreme_c1s_defconfig
+          - extreme_c2s_defconfig
+      clean_build:
+        description: 'Perform clean build?'
+        required: true
+        default: 'true'
+        type: boolean
 
 jobs:
   build:
@@ -9,58 +25,56 @@ jobs:
     timeout-minutes: 120
 
     steps:
-    - name: سحب ملفات المشروع
+    - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: تثبيت المتطلبات 
+    - name: Install dependencies
       run: |
         sudo apt update
         sudo apt install -y bc bison build-essential ccache curl flex git libncurses-dev libssl-dev python3 unzip wget xz-utils
 
-    - name: تنظيف البيئة
+    - name: Setup environment
       run: |
         rm -rf kernel toolchain
-
-    - name: استنساخ مصدر النواة
-      run: |
         git clone --depth=1 --branch main https://github.com/usama19931993/exynos990-kernel1.git kernel
         cd kernel
-        echo "📂 الملفات المتاحة في arch/arm64/configs/:"
+        echo "Available config files:"
         ls arch/arm64/configs/
 
-    - name: إعداد KernelSU
+    - name: Setup KernelSU
       run: |
         cd kernel
-        git submodule add https://github.com/tiann/KernelSU.git drivers/kernelsu
+        git submodule add --force https://github.com/tiann/KernelSU.git drivers/kernelsu
         cd drivers/kernelsu && git submodule update --init && cd ../..
         echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
 
-    - name: إعداد أداة التجميع
+    - name: Setup toolchain
       run: |
         git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git toolchain
         echo "$PWD/toolchain/bin" >> $GITHUB_PATH
         echo "CROSS_COMPILE=$PWD/toolchain/bin/aarch64-linux-android-" >> $GITHUB_ENV
 
-    - name: بناء النواة
+    - name: Build kernel
       run: |
         cd kernel
-        make O=out ARCH=arm64 clean
-        make O=out ARCH=arm64 mrproper
+        if [[ "${{ inputs.clean_build }}" == "true" ]]; then
+          make O=out ARCH=arm64 clean
+          make O=out ARCH=arm64 mrproper
+        fi
         
-        # استخدام stock_defconfig مع تعديلات KernelSU
-        cp arch/arm64/configs/stock_defconfig arch/arm64/configs/g988_temp_defconfig
-        echo "CONFIG_KSU=y" >> arch/arm64/configs/g988_temp_defconfig
-        echo "CONFIG_KSU_DEBUG=y" >> arch/arm64/configs/g988_temp_defconfig
+        echo "Using config: ${{ inputs.config_choice }}"
+        cp arch/arm64/configs/${{ inputs.config_choice }} arch/arm64/configs/temp_defconfig
+        echo "CONFIG_KSU=y" >> arch/arm64/configs/temp_defconfig
+        echo "CONFIG_KSU_DEBUG=y" >> arch/arm64/configs/temp_defconfig
         
-        make O=out ARCH=arm64 g988_temp_defconfig
+        make O=out ARCH=arm64 temp_defconfig
         make -j$(($(nproc)*2)) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- CC="ccache aarch64-linux-android-gcc" 2>&1 | tee build.log
 
-    - name: إنشاء صورة Boot
+    - name: Package boot image
       run: |
         cd kernel
         if [ ! -f "mkbootimg.sh" ]; then
-          echo "📦 إنشاء mkbootimg.sh تلقائياً..."
-          cat > mkbootimg.sh <<EOL
+          cat > mkbootimg.sh <<'EOL'
 #!/bin/bash
 ./tools/mkbootimg \
   --kernel out/arch/arm64/boot/Image \
@@ -77,10 +91,10 @@ EOL
         bash ./mkbootimg.sh
         tar -cvf boot.tar.md5 boot.img
 
-    - name: رفع المخرجات
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: kernel-build-$(date +%s)
+        name: kernel-build-${{ github.run_id }}
         path: |
           kernel/boot.tar.md5
           kernel/build.log
