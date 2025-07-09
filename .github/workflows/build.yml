@@ -54,28 +54,3 @@ jobs:
         echo "/usr/bin/ccache" >> $GITHUB_PATH
         echo "CCACHE_DIR=$GITHUB_WORKSPACE/ccache" >> $GITHUB_ENV
         mkdir -p $GITHUB_WORKSPACE/ccache
-
-    - name: بناء النواة
-      run: |
-        cd kernel
-        make O=out ARCH=arm64 clean
-        make O=out ARCH=arm64 mrproper
-        make O=out ARCH=arm64 g988_defconfig
-        make -j$(($(nproc)*2)) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- CC="ccache aarch64-linux-android-gcc" 2>&1 | tee build.log
-
-    - name: تغليف الصورة النهائية
-      run: |
-        cd kernel
-        [ -f mkbootimg.sh ] && bash ./mkbootimg.sh || echo "⚠️ ملف mkbootimg.sh غير موجود"
-        [ -f boot.img ] && tar -cvf boot.tar.md5 boot.img || echo "⚠️ ملف boot.img غير موجود"
-
-    - name: رفع المخرجات
-      if: success()
-      uses: actions/upload-artifact@v4
-      with:
-        name: kernel-build-artifacts
-        path: |
-          kernel/boot.tar.md5
-          kernel/build.log
-          kernel/out/arch/arm64/boot/Image
-        retention-days: 3
