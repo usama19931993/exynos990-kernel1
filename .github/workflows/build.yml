@@ -68,9 +68,9 @@ jobs:
         unzip boot-original.zip -d boot-original
         cp boot-original/boot.img .
 
-    - name: Download and setup magiskboot
+    - name: Download and setup magiskboot (fixed source)
       run: |
-        wget https://github.com/topjohnwu/magisk/releases/latest/download/magiskboot -O magiskboot
+        wget https://raw.githubusercontent.com/Kernel-SU/tools/main/magiskboot -O magiskboot
         chmod +x magiskboot
 
     - name: Repack boot.img with new kernel
