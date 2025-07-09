@@ -12,7 +12,7 @@ jobs:
     - name: سحب ملفات المشروع
       uses: actions/checkout@v4
 
-    - name: تثبيت المتطلبات
+    - name: تثبيت المتطلبات 
       run: |
         sudo apt update
         sudo apt install -y bc bison build-essential ccache curl flex git libncurses-dev libssl-dev python3 unzip wget xz-utils
