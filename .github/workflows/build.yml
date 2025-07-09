@@ -17,7 +17,9 @@ jobs:
         sudo apt install -y bc bison build-essential curl flex git libncurses-dev libssl-dev python3 unzip wget xz-utils
 
     - name: استنساخ مصدر النواة إلى مجلد kernel/
-      run: git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
+      run: |
+        rm -rf kernel
+        git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
 
     - name: استنساخ KernelSU ونقلها إلى drivers/kernelsu
       run: |
