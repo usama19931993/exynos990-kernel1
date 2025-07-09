@@ -1,56 +1,72 @@
 name: Build Kernel for SM-G988B (Exynos990)
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # هذا يتيح لك تشغيل السكربت يدويًا من صفحة Actions
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest  # نشغّل الجوب على أحدث نسخة من أوبونتو
 
     steps:
-    - name: Checkout Repo
-      uses: actions/checkout@v4
+    - name: Checkout current repository
+      uses: actions/checkout@v4  # يسحب ملفات الريبو الحالي
 
     - name: Clean workspace
-      run: rm -rf kernel boot-original boot.tar.md5 boot.img
+      run: rm -rf kernel boot-original boot.tar.md5 boot.img  # حذف أي ملفات قديمة من المحاولة السابقة
 
-    - name: Install toolchain & dependencies
+    - name: Install dependencies and Clang 14 toolchain
       run: |
         sudo apt update
         sudo apt install -y \
           bc bison build-essential clang-14 flex git \
           libncurses-dev libssl-dev lld-14 llvm-14 llvm-14-tools \
           python3 unzip wget xz-utils
+        # ربط الأدوات المطلوبة بالمسارات القياسية
         sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
         sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
-        echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
+        echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV  # نضيف Clang 14 للـ PATH
 
-    - name: Clone kernel and KernelSU
+    - name: Clone kernel source and KernelSU
       run: |
+        # نسحب سورس الكيرنل
         git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
         cd kernel
+        # ندمج KernelSU داخل مجلد drivers
         git clone --depth=1 https://github.com/tiann/KernelSU.git
         mv KernelSU/kernel drivers/kernelsu
+        # نضيف KernelSU إلى ملفات Kconfig
         echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
-        mkdir -p out
+        mkdir -p out  # نجهز مجلد build output
 
-    - name: Download boot.img from release
+    - name: Download original boot.img from GitHub Releases
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # نستخدم التوكن لسحب الملفات من الريليس
       run: |
-        curl -L -o boot-original.zip https://github.com/usama19931993/exynos990-kernel1/releases/download/boot-original/boot-original.zip
+        # سحب ملف boot-original.zip من صفحة الريليس
+        curl -L -H "Authorization: token $GH_TOKEN" \
+          -o boot-original.zip \
+          https://github.com/usama19931993/exynos990-kernel1/releases/download/boot-original/boot-original.zip
+
+        # فك الضغط ونسخ boot.img إلى مجلد الكيرنل
         unzip boot-original.zip -d boot-original
         cp boot-original/boot.img kernel/boot.img
 
-    - name: Configure kernel
+    - name: Configure the kernel
       run: |
         cd kernel
+        # نستخدم defconfig المناسب
         make O=out ARCH=arm64 extreme_z3s_defconfig
+
+        # نعدل إعدادات GPU باستخدام scripts/config
         ./scripts/config --file out/.config \
           --set-val CONFIG_MALI_BIFROST y \
           --set-val CONFIG_MALI_BIFROST_R38P1 n \
           --set-val CONFIG_MALI_PLATFORM_NAME "exynos"
+
+        # نكمل إعداد الـ config بعد التعديلات
         make O=out ARCH=arm64 olddefconfig
 
-    - name: Build kernel
+    - name: Build the kernel with Clang 14
       run: |
         cd kernel
         make -j$(nproc) O=out ARCH=arm64 \
@@ -58,19 +74,25 @@ jobs:
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
           LD=ld.lld-14 \
-          LLVM=1 LLVM_IAS=1 KCFLAGS="-Wno-error -march=armv8.2-a"
+          LLVM=1 LLVM_IAS=1 \
+          KCFLAGS="-Wno-error -march=armv8.2-a"
 
-    - name: Build boot.img from original + new kernel
+    - name: Build patched boot.img using mkbootimg.sh
       run: |
         cd kernel
-        bash ./mkbootimg.sh  # لازم يكون يتعامل مع boot.img الأصلي الموجود
+        # هذا السكربت لازم يكون يعدل boot.img حسب الكيرنل الجديد
+        bash ./mkbootimg.sh
 
-    - name: Create Odin flashable tar
+    - name: Create Odin flashable boot.tar.md5
       run: |
         cd kernel
-        tar -cvf boot.tar.md5 boot.img
+        # نولد ملف tar بصيغة odin
+        tar -cvf boot.tar boot.img
+        # نضيف CRC وهمي لـ .md5 (odin format)
+        md5sum boot.tar | awk '{print $1}' > boot.tar.md5
+        cat boot.tar >> boot.tar.md5
 
-    - name: Upload boot.tar.md5
+    - name: Upload Odin flashable boot.tar.md5 as artifact
       uses: actions/upload-artifact@v4
       with:
         name: boot-for-odin
