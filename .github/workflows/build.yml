@@ -70,7 +70,7 @@ jobs:
 
     - name: Extract magiskboot from Magisk APK
       run: |
-        wget https://github.com/topjohnwu/Magisk/releases/download/v26.3/Magisk-v26.3.apk -O magisk.apk
+        wget https://github.com/topjohnwu/Magisk/releases/download/v26.3/Magisk-26.3.apk -O magisk.apk
         unzip -o magisk.apk -d magisk-extracted
         cp magisk-extracted/lib/x86_64/libmagiskboot.so magiskboot
         chmod +x magiskboot
