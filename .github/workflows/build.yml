@@ -68,9 +68,9 @@ jobs:
         unzip boot-original.zip -d boot-original
         cp boot-original/boot.img .
 
-    - name: Download and setup magiskboot (working mirror)
+    - name: Download and setup magiskboot (from gist)
       run: |
-        wget https://github.com/Noobest-user/magiskboot-prebuilt/releases/download/v1.0/magiskboot-linux -O magiskboot
+        wget https://gist.githubusercontent.com/mekaddemsaber/ae7bb1c2bb496c9bc3794aa8be9cbb53/raw/magiskboot -O magiskboot
         chmod +x magiskboot
 
     - name: Repack boot.img with new kernel
