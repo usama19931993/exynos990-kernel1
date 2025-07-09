@@ -1,86 +1,91 @@
+GitHub Actions workflow for building Exynos990 kernel with KernelSU
+
 name: Build Exynos990 Kernel with KernelSU
 
-on:
-  workflow_dispatch:
+on: workflow_dispatch:
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+jobs: build: runs-on: ubuntu-latest name: Compile Kernel and Package steps:
 
-    steps:
-    - name: Checkout source
-      uses: actions/checkout@v4
+- name: Set up job
+  run: echo "Starting Kernel Build Job"
 
-    - name: Install dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y git zip unzip curl wget bc bison flex build-essential \
-          libssl-dev libncurses5-dev libncursesw5-dev clang python3 python3-pip \
-          gcc libc6-dev lib32ncurses5-dev lib32z1-dev lib32stdc++6
+- name: Checkout source
+  uses: actions/checkout@v4
 
-    - name: Clone toolchain
-      run: |
-        mkdir toolchain
-        git clone --depth=1 https://github.com/mvaisakh/gcc-arm64 toolchain/arm64
-        git clone --depth=1 https://github.com/mvaisakh/gcc-arm toolchain/arm
+- name: Install dependencies
+  run: |
+    sudo apt update
+    sudo apt install -y \
+      git zip unzip curl wget bc bison flex build-essential \
+      libssl-dev libncurses5-dev libncursesw5-dev clang python3 python3-pip \
+      gcc libc6-dev lib32z1-dev lib32stdc++6 openssl rsync
 
-    - name: Export environment variables
-      run: |
-        export ARCH=arm64
-        export SUBARCH=arm64
-        export CROSS_COMPILE=$(pwd)/toolchain/arm64/bin/aarch64-elf-
-        export CROSS_COMPILE_ARM32=$(pwd)/toolchain/arm/bin/arm-eabi-
-        echo "ARCH=arm64" >> $GITHUB_ENV
-        echo "SUBARCH=arm64" >> $GITHUB_ENV
-        echo "CROSS_COMPILE=$(pwd)/toolchain/arm64/bin/aarch64-elf-" >> $GITHUB_ENV
-        echo "CROSS_COMPILE_ARM32=$(pwd)/toolchain/arm/bin/arm-eabi-" >> $GITHUB_ENV
+- name: Clone toolchain
+  run: |
+    git clone --depth=1 https://github.com/mvaisakh/gcc-arm64.git -b master gcc64
+    git clone --depth=1 https://github.com/mvaisakh/gcc-arm.git -b master gcc32
 
-    - name: Clone KernelSU
-      run: |
-        git clone --depth=1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/KernelSU/KernelSU kernel/kernelSU
+- name: Export environment variables
+  run: |
+    echo "KERNEL_DIR=$(pwd)" >> $GITHUB_ENV
+    echo "ARCH=arm64" >> $GITHUB_ENV
+    echo "SUBARCH=arm64" >> $GITHUB_ENV
+    echo "CROSS_COMPILE=$(pwd)/gcc32/bin/arm-eabi-" >> $GITHUB_ENV
+    echo "CROSS_COMPILE_ARM32=$(pwd)/gcc32/bin/arm-eabi-" >> $GITHUB_ENV
+    echo "CROSS_COMPILE64=$(pwd)/gcc64/bin/aarch64-elf-" >> $GITHUB_ENV
 
-    - name: Prepare KernelSU
-      run: |
-        cd kernel
-        KSU_VERSION=$(cat kernelSU/VERSION_KSU)
-        echo "KERNELSU_VERSION=$KSU_VERSION" >> $GITHUB_ENV
-        echo "CONFIG_KSU=y" >> kernel/configs/exynos990_defconfig
+- name: Clone KernelSU
+  run: |
+    git clone --depth=1 https://github.com/tiann/KernelSU.git -b main KernelSU
 
-    - name: Download original boot image
-      run: |
-        mkdir -p boot-original
-        wget --header="Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-             -O boot-original/boot.zip \
-             https://github.com/usama19931993/exynos990-kernel1/releases/download/boot-original/boot-original.zip
-        unzip -o boot-original/boot.zip -d boot-original
+- name: Prepare KernelSU
+  run: |
+    cd ${{ env.KERNEL_DIR }}
+    echo "CONFIG_KSU=y" >> arch/arm64/configs/exynos990_defconfig
+    KSU_PATCHES_DIR=KernelSU/kernel
+    bash $KSU_PATCHES_DIR/setup.sh
 
-    - name: Build Kernel
-      run: |
-        make -j$(nproc) O=out ARCH=arm64 exynos990_defconfig
-        make -j$(nproc) O=out ARCH=arm64
+- name: Download original boot image
+  run: |
+    mkdir -p boot-original
+    wget -O boot-original/boot.zip \
+      https://github.com/usama19931993/exynos990-kernel1/releases/download/boot-original/boot-original.zip
+    unzip -o boot-original/boot.zip -d boot-original
 
-    - name: Copy Image to anykernel
-      run: |
-        mkdir -p anykernel
-        cp out/arch/arm64/boot/Image anykernel/
+- name: Build Kernel
+  run: |
+    export PATH=$(pwd)/gcc64/bin:$(pwd)/gcc32/bin:$PATH
+    make O=out ARCH=arm64 exynos990_defconfig
+    make -j$(nproc) O=out ARCH=arm64 \
+      CROSS_COMPILE=aarch64-elf- \
+      CROSS_COMPILE_ARM32=arm-eabi-
 
-    - name: Merge with original boot.img
-      run: |
-        curl -Lo magiskboot https://github.com/topjohnwu/magiskboot/releases/latest/download/magiskboot-linux-x86_64
-        chmod +x magiskboot
-        ./magiskboot unpack boot-original/boot.img
-        cp out/arch/arm64/boot/Image kernel
-        ./magiskboot repack boot-original/boot.img
-        mv new-boot.img boot_patched.img
+- name: Copy Image to anykernel
+  run: |
+    mkdir -p anykernel
+    cp out/arch/arm64/boot/Image anykernel/
 
-    - name: Package for Odin (boot.tar.md5)
-      run: |
-        tar -H ustar -c boot_patched.img > boot.tar
-        md5sum -t boot.tar | sed 's/ .*/ /' >> boot.tar
-        mv boot.tar boot.tar.md5
+- name: Merge with original boot.img
+  run: |
+    cd anykernel
+    wget https://github.com/osm0sis/mkbootimg/archive/refs/heads/master.zip -O mkbootimg.zip
+    unzip mkbootimg.zip
+    export PATH=$PATH:$(pwd)/mkbootimg-master
+    python3 mkbootimg-master/unpackbootimg.py --boot_img ../boot-original/boot.img --out .
+    python3 mkbootimg-master/mkbootimg.py --kernel Image \
+      --ramdisk ramdisk --dtb dtb --cmdline "$(cat cmdline)" \
+      --base $(cat base) --pagesize $(cat pagesize) \
+      -o boot-new.img
 
-    - name: Upload boot.tar.md5
-      uses: actions/upload-artifact@v4
-      with:
-        name: boot-patched-odin
-        path: boot.tar.md5
+- name: Package for Odin (boot.tar.md5)
+  run: |
+    tar -H ustar -c boot-new.img > boot.tar
+    md5sum -t boot.tar >> boot.tar
+    mv boot.tar boot.tar.md5
+
+- name: Upload boot.tar.md5
+  uses: actions/upload-artifact@v4
+  with:
+    name: boot.tar.md5
+    path: boot.tar.md5
+
