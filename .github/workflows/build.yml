@@ -4,32 +4,3 @@ name: Build Kernel for SM-G988B (Exynos990)
 
 on:
 workflow_dispatch:
-
-jobs:
-build:
-runs-on: ubuntu-latest
-timeout-minutes: 90  # 
-- name: Configure kernel
-      run: |
-        cd kernel
-        make O=out ARCH=arm64 extreme_z3s_defconfig
-        
-        # إعدادات GPU المعدلة
-        ./scripts/config --file out/.config \
-          --set-val CONFIG_MALI_BIFROST y \
-          --set-val CONFIG_MALI_BIFROST_R38P1 n \
-          --set-val CONFIG_MALI_PLATFORM_NAME "exynos"
-        
-        make O=out ARCH=arm64 olddefconfig
-
-    - name: Build kernel
-      run: |
-        cd kernel
-        make -j$(nproc) O=out ARCH=arm64 \
-          CC=clang-14 \
-          CLANG_TRIPLE=aarch64-linux-gnu- \
-          CROSS_COMPILE=aarch64-linux-gnu- \
-          LD=ld.lld-14 \
-          LLVM=1 \
-          LLVM_IAS=1 \
-          KCFLAGS="-Wno-error -march=armv8.2-a"
