@@ -6,7 +6,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 120  # زيادة وقت التنفيذ
+    timeout-minutes: 120
 
     steps:
     - name: سحب ملفات المشروع
@@ -24,16 +24,11 @@ jobs:
     - name: استنساخ مصدر النواة
       run: |
         git clone --depth=1 --branch main https://github.com/usama19931993/exynos990-kernel1.git kernel
-        # التحقق من وجود ملف التكوين
         cd kernel
-        if [ ! -f "arch/arm64/configs/g988_defconfig" ]; then
-          echo "❌ ملف g988_defconfig غير موجود!"
-          echo "الملفات المتاحة في arch/arm64/configs/:"
-          ls arch/arm64/configs/ || true
-          exit 1
-        fi
+        echo "📂 الملفات المتاحة في arch/arm64/configs/:"
+        ls arch/arm64/configs/
 
-    - name: إضافة KernelSU بشكل صحيح
+    - name: إعداد KernelSU
       run: |
         cd kernel
         git submodule add https://github.com/tiann/KernelSU.git drivers/kernelsu
@@ -45,47 +40,48 @@ jobs:
         git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git toolchain
         echo "$PWD/toolchain/bin" >> $GITHUB_PATH
         echo "CROSS_COMPILE=$PWD/toolchain/bin/aarch64-linux-android-" >> $GITHUB_ENV
-        echo "PATH=$PWD/toolchain/bin:$PATH" >> $GITHUB_ENV
-
-    - name: تهيئة ccache
-      run: |
-        echo "/usr/bin/ccache" >> $GITHUB_PATH
-        echo "CCACHE_DIR=$GITHUB_WORKSPACE/ccache" >> $GITHUB_ENV
-        mkdir -p $GITHUB_WORKSPACE/ccache
 
     - name: بناء النواة
       run: |
         cd kernel
         make O=out ARCH=arm64 clean
         make O=out ARCH=arm64 mrproper
-        # استخدام defconfig الصحيح مع معالجة الأخطاء
-        if ! make O=out ARCH=arm64 g988_defconfig; then
-          echo "⚠️ محاولة استخدام ملف defconfig بديل..."
-          ls arch/arm64/configs/
-          # جرب ملف defconfig آخر إذا كان متاحاً
-          make O=out ARCH=arm64 exynos9830-g988b_defconfig || \
-          make O=out ARCH=arm64 exynos990_defconfig || \
-          make O=out ARCH=arm64 defconfig
-        fi
+        
+        # استخدام stock_defconfig مع تعديلات KernelSU
+        cp arch/arm64/configs/stock_defconfig arch/arm64/configs/g988_temp_defconfig
+        echo "CONFIG_KSU=y" >> arch/arm64/configs/g988_temp_defconfig
+        echo "CONFIG_KSU_DEBUG=y" >> arch/arm64/configs/g988_temp_defconfig
+        
+        make O=out ARCH=arm64 g988_temp_defconfig
         make -j$(($(nproc)*2)) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- CC="ccache aarch64-linux-android-gcc" 2>&1 | tee build.log
 
-    - name: تغليف الصورة النهائية
+    - name: إنشاء صورة Boot
       run: |
         cd kernel
-        if [ -f mkbootimg.sh ]; then
-          bash ./mkbootimg.sh
-        else
-          echo "⚠️ إنشاء boot.img يدوياً..."
-          cp out/arch/arm64/boot/Image boot.img || true
+        if [ ! -f "mkbootimg.sh" ]; then
+          echo "📦 إنشاء mkbootimg.sh تلقائياً..."
+          cat > mkbootimg.sh <<EOL
+#!/bin/bash
+./tools/mkbootimg \
+  --kernel out/arch/arm64/boot/Image \
+  --ramdisk out/ramdisk.cpio \
+  --cmdline "console=ttyS0,115200n8" \
+  --base 0x10000000 \
+  --pagesize 2048 \
+  --os_version 11.0.0 \
+  --os_patch_level 2025-07 \
+  -o boot.img
+EOL
+          chmod +x mkbootimg.sh
         fi
-        [ -f boot.img ] && tar -cvf boot.tar.md5 boot.img || echo "⚠️ فشل في إنشاء boot.img"
+        bash ./mkbootimg.sh
+        tar -cvf boot.tar.md5 boot.img
 
     - name: رفع المخرجات
       uses: actions/upload-artifact@v4
       with:
-        name: kernel-build-$(date +%Y%m%d%H%M%S)
+        name: kernel-build-$(date +%s)
         path: |
           kernel/boot.tar.md5
           kernel/build.log
           kernel/out/.config
-        retention-days: 7
