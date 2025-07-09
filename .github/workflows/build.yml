@@ -1,4 +1,4 @@
-name: بناء نواة SM-G988B (Exynos990)
+name: Build Kernel SM‑G988B
 
 on:
   workflow_dispatch:
@@ -6,57 +6,57 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
     steps:
-    - name: 🧾 جلب الملفات من المستودع
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+      with:
+        submodules: 'recursive'
 
-    - name: 🧰 تثبيت المتطلبات
+    - name: تثبيت الحزم
       run: |
         sudo apt update
-        sudo apt install -y bc bison build-essential curl flex git libncurses-dev libssl-dev python3 unzip wget xz-utils
+        sudo apt install -y libssl-dev libncurses-dev libarchive-tools ccache clang lld
 
-    - name: 🧬 نسخ نواة سامسونج
-      run: git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
-
-    - name: 🔧 دمج KernelSU
+    - name: إعداد toolchain Android
       run: |
-        cd kernel
-        git clone --depth=1 https://github.com/tiann/KernelSU.git
-        mv KernelSU/kernel drivers/kernelsu
+        wget -q -O aarch64-toolchain.tar.gz \
+          https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/heads/master.tar.gz
+        tar -xzf aarch64-toolchain.tar.gz -C /opt/toolchain
+        echo "/opt/toolchain/bin" >> $GITHUB_PATH
+        echo "CROSS_COMPILE=/opt/toolchain/bin/aarch64-linux-android-" >> $GITHUB_ENV
 
-    - name: ➕ تحديث Kconfig
-      run: echo 'source "drivers/kernelsu/Kconfig"' >> kernel/drivers/Kconfig
-
-    - name: 🛠️ تحميل التولتشين
-      run: |
-        mkdir -p toolchain
-        cd toolchain
-        wget https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/heads/master.tar.gz -O toolchain.tar.gz
-        tar -xzf toolchain.tar.gz
-        echo "CROSS_COMPILE=$(pwd)/aarch64-linux-android-" >> $GITHUB_ENV
-        echo "PATH=$(pwd):$PATH" >> $GITHUB_ENV
-
-    - name: 📥 تحميل boot.img الأصلي من الريليس
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: تحميل صورة boot الأصلية
       run: |
         mkdir -p boot-original
-        wget --header="Authorization: token $GH_TOKEN" \
-          -O boot-original/boot.zip \
-          https://github.com/usama19931993/exynos990-kernel1/releases/download/boot-original/boot-original.zip
-        unzip -o boot-original/boot.zip -d boot-original
-        mkdir -p kernel
-        cp boot-original/boot.img kernel/
+        wget -q --header="Authorization: token $GH_TOKEN" \
+          -O boot-original/boot-original.zip \
+          "https://api.github.com/repos/usama19931993/exynos990-kernel1/releases/latest/assets/ASSET_ID?name=boot-original.zip"
+        unzip -o boot-original/boot-original.zip -d boot-original
+        cp boot-original/boot.img kernel/boot.img
 
-    - name: 🧪 بناء النواة
+    - name: بناء الكيرنل
       run: |
         cd kernel
         make O=out ARCH=arm64 g988_defconfig
-        make -j$(nproc) O=out ARCH=arm64
+        scripts/config --file out/.config \
+          --set-val CONFIG_MALI_BIFROST y \
+          --set-val CONFIG_MALI_BIFROST_R38P1 n \
+          --set-val CONFIG_MALI_PLATFORM_NAME "exynos"
+        make O=out ARCH=arm64 olddefconfig
+        make -j$(nproc) O=out ARCH=arm64 \
+          CC=clang CROSS_COMPILE=$CROSS_COMPILE \
+          LD=ld.lld LLVM=1 LLVM_IAS=1
 
-    - name: 📦 تغليف boot.img إلى boot.tar.md5
+    - name: حزم boot.tar.md5
       run: |
         cd kernel
-        bash ./mkbootimg.sh
+        bash mkbootimg.sh
         tar -cvf boot.tar.md5 boot.img
+
+    - name: رفع الأداة للتحميل
+      uses: actions/upload-artifact@v4
+      with:
+        name: boot.tar.md5
+        path: kernel/boot.tar.md5
