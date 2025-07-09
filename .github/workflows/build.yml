@@ -1,57 +1,113 @@
 name: Build Kernel for SM-G988B (Exynos990)
 
 on:
-workflow_dispatch:
+  workflow_dispatch:
 
 jobs:
-build:
-runs-on: ubuntu-latest
-timeout-minutes: 90  # زيادة وقت التنفيذ
+  build:
+    runs-on: ubuntu-latest
 
-steps:  
-- name: سحب ملفات المشروع  
-  uses: actions/checkout@v4  
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
 
-- name: تثبيت المتطلبات  
-  run: |  
-    sudo apt update  
-    sudo apt install -y bc bison build-essential ccache curl flex git libncurses-dev libssl-dev python3 unzip wget xz-utils  
+    - name: Clean workspace
+      run: rm -rf kernel boot*
 
-- name: تنظيف البيئة  
-  run: |  
-    rm -rf kernel toolchain  
+    - name: Install dependencies and toolchains
+      run: |
+        sudo apt update
+        sudo apt install -y \
+          bc \
+          bison \
+          build-essential \
+          clang-14 \
+          flex \
+          git \
+          libncurses-dev \
+          libssl-dev \
+          lld-14 \
+          llvm-14 \
+          llvm-14-tools \
+          python3 \
+          unzip \
+          wget \
+          xz-utils
+        sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
+        sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
+        echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
 
-- name: استنساخ مصدر النواة  
-  run: |  
-    git clone --depth=1 --branch main https://github.com/usama19931993/exynos990-kernel1.git kernel  
+    - name: Clone and prepare kernel
+      run: |
+        git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
+        cd kernel
+        git clone --depth=1 https://github.com/tiann/KernelSU.git
+        mv KernelSU/kernel drivers/kernelsu
+        echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+        mkdir -p out
 
-- name: إضافة KernelSU  
-  run: |  
-    cd kernel  
-    git clone --depth=1 https://github.com/tiann/KernelSU.git  
-    mv KernelSU/kernel drivers/kernelsu  
-    rm -rf KernelSU  
-    echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig  
+    - name: Configure kernel
+      run: |
+        cd kernel
+        make O=out ARCH=arm64 extreme_z3s_defconfig
+        ./scripts/config --file out/.config \
+          --set-val CONFIG_MALI_BIFROST y \
+          --set-val CONFIG_MALI_BIFROST_R38P1 n \
+          --set-val CONFIG_MALI_PLATFORM_NAME "exynos"
+        make O=out ARCH=arm64 olddefconfig
 
-- name: إعداد أداة التجميع (Toolchain)  
-  run: |  
-    # المحاولة مع روابط بديلة  
-    git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git toolchain || \  
-    git clone --depth=1 https://github.com/bgcngm/aarch64-linux-android-4.9.git toolchain || \  
-    git clone --depth=1 git://github.com/bgcngm/aarch64-linux-android-4.9.git toolchain  
-      
-    if [ -d "toolchain" ]; then  
-      echo "$PWD/toolchain/bin" >> $GITHUB_PATH  
-      echo "CROSS_COMPILE=$PWD/toolchain/bin/aarch64-linux-android-" >> $GITHUB_ENV  
-      echo "PATH=$PWD/toolchain/bin:$PATH" >> $GITHUB_ENV  
-    else  
-      echo "❌ فشل في الحصول على أداة التجميع!"  
-      exit 1  
-    fi  
+    - name: Build kernel
+      run: |
+        cd kernel
+        make -j$(nproc) O=out ARCH=arm64 \
+          CC=clang-14 \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          LD=ld.lld-14 \
+          LLVM=1 \
+          LLVM_IAS=1 \
+          KCFLAGS="-Wno-error -march=armv8.2-a"
 
-- name: تهيئة ccache  
-  run: |  
-    echo "/usr/bin/ccache" >> $GITHUB_PATH  
-    echo "CCACHE_DIR=$GITHUB_WORKSPACE/ccache" >> $GITHUB_ENV  
-    mkdir -p $GITHUB_WORKSPACE/ccache
+    - name: Install magiskboot
+      run: |
+        git clone --depth=1 https://github.com/topjohnwu/magiskboot.git
+        cd magiskboot
+        make
+        sudo cp magiskboot /usr/local/bin/
 
+    - name: Download original boot.img from GitHub Releases
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh release download "boot-original" -R usama19931993/exynos990-kernel1 -p "boot-original.zip"
+        unzip boot-original.zip
+
+    - name: Unpack boot.img
+      run: |
+        magiskboot unpack boot.img
+
+    - name: Replace kernel image
+      run: |
+        cp kernel/out/arch/arm64/boot/Image.gz-dtb kernel
+
+    - name: Repack boot.img
+      run: |
+        cd kernel
+        mv ../Image.gz-dtb .
+        mv ../boot.img .
+        magiskboot unpack boot.img
+        mv Image.gz-dtb kernel
+        magiskboot repack boot.img
+        mv new-boot.img boot.img
+
+    - name: Package final boot.img to .tar.md5
+      run: |
+        tar -H ustar -c boot.img > boot.tar
+        echo -n "SEC_MAGIC" >> boot.tar
+        mv boot.tar boot.tar.md5
+
+    - name: Upload boot.tar.md5
+      uses: actions/upload-artifact@v4
+      with:
+        name: boot.tar.md5
+        path: boot.tar.md5
