@@ -6,6 +6,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 60  # زيادة وقت التنفيذ
 
     steps:
     - name: سحب ملفات المشروع
@@ -16,42 +17,58 @@ jobs:
         sudo apt update
         sudo apt install -y bc bison build-essential curl flex git libncurses-dev libssl-dev python3 unzip wget xz-utils
 
-    - name: تنظيف البيئة (إن وجدت)
+    - name: تنظيف البيئة
       run: |
         rm -rf kernel toolchain
 
-    - name: استنساخ مصدر النواة إلى مجلد kernel/
+    - name: استنساخ مصدر النواة
       run: |
         git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
 
-    - name: استنساخ KernelSU ونقلها إلى drivers/kernelsu
+    - name: إضافة KernelSU
       run: |
         cd kernel
         git clone --depth=1 https://github.com/tiann/KernelSU.git
         mv KernelSU/kernel drivers/kernelsu
         rm -rf KernelSU
-
-    - name: ربط Kconfig الخاصة بـ KernelSU مع Kconfig العام
-      run: |
-        cd kernel
         echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
 
-    - name: إعداد toolchain Android
+    - name: إعداد أداة التجميع (Toolchain)
       run: |
-        git clone --depth=1 https://github.com/bgcngm/aarch64-linux-android-4.9.git toolchain
-        echo "$PWD/toolchain/bin" >> $GITHUB_PATH
-        echo "CROSS_COMPILE=$PWD/toolchain/bin/aarch64-linux-android-" >> $GITHUB_ENV
+        # المحاولة الأولى مع git protocol
+        if ! git clone --depth=1 git://github.com/bgcngm/aarch64-linux-android-4.9.git toolchain; then
+          echo "المحاولة الأولى فشلت، جارٍ المحاولة عبر HTTPS..."
+          # المحاولة الثانية مع HTTPS
+          git clone --depth=1 https://github.com/bgcngm/aarch64-linux-android-4.9.git toolchain || true
+        fi
+        
+        if [ -d "toolchain" ]; then
+          echo "$PWD/toolchain/bin" >> $GITHUB_PATH
+          echo "CROSS_COMPILE=$PWD/toolchain/bin/aarch64-linux-android-" >> $GITHUB_ENV
+        else
+          echo "❌ فشل في الحصول على أداة التجميع!"
+          exit 1
+        fi
 
-    - name: تنظيف وبناء النواة
+    - name: بناء النواة
       run: |
         cd kernel
         make O=out ARCH=arm64 clean
         make O=out ARCH=arm64 mrproper
         make O=out ARCH=arm64 g988_defconfig
-        make -j$(nproc) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-android-
+        make -j$(nproc) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- 2>&1 | tee build.log
 
-    - name: تغليف boot.img إلى boot.tar.md5
+    - name: تغليف الصورة النهائية
       run: |
         cd kernel
         bash ./mkbootimg.sh
         tar -cvf boot.tar.md5 boot.img
+
+    - name: رفع المخرجات (اختياري)
+      if: success()
+      uses: actions/upload-artifact@v3
+      with:
+        name: kernel-build
+        path: |
+          kernel/boot.tar.md5
+          kernel/build.log
