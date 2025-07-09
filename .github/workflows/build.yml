@@ -2,7 +2,6 @@ name: Build Kernel for SM-G988B (Exynos990)
 
 on:
   workflow_dispatch:
-
 - name: Configure kernel
       run: |
         cd kernel
