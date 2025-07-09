@@ -1,31 +1,13 @@
-name: Build Kernel
+- name: 🔧 دمج KernelSU في الكيرنل
+  shell: bash
+  run: |
+    echo "✅ بدء دمج KernelSU..."
+    git clone --depth=1 -b main https://github.com/KernelSU/KernelSU kernel/kernelSU
 
-on:
-  push:
-    branches:
-      - main
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: 🟢 بدء تنفيذ السكربت
-        run: echo "✅ بدأ تنفيذ سكربت البناء..."
-
-      - name: 🔻 تحميل ملف البوت الأصلي
-        run: |
-          mkdir -p boot-original
-          wget --header="Authorization: token ${{ secrets.GH_TOKEN }}" \
-            -O boot-original/boot.zip \
-            https://github.com/usama19931993/exynos990-kernel1/releases/download/boot-original/boot-original.zip
-          unzip -o boot-original/boot.zip -d boot-original
-          cp boot-original/boot.img kernel/
-
-      - name: 🔧 دمج KernelSU مع الكيرنل
-        run: |
-          git clone --depth=1 -b main https://github.com/KernelSU/KernelSU kernel/kernelSU
-          cd kernel
-          KERNEL_SOURCE=$(pwd)
-          KSU_DIR=$KERNEL_SOURCE/kernelSU
-          bash $KSU_DIR/scripts/merge.sh $KERNEL_SOURCE
+    if [ -f kernel/arch/arm64/configs/exynos990_defconfig ]; then
+      echo 'CONFIG_KERNELSU=y' >> kernel/arch/arm64/configs/exynos990_defconfig
+      echo "✅ تم تفعيل CONFIG_KERNELSU في exynos990_defconfig"
+    else
+      echo "❌ ملف exynos990_defconfig غير موجود! تحقق من المسار أو الاسم."
+      exit 1
+    fi
