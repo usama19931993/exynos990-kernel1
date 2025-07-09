@@ -8,34 +8,30 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout
+    - name: Checkout source code
       uses: actions/checkout@v4
 
     - name: Clean workspace
-      run: rm -rf kernel boot.img boot.tar.md5
+      run: rm -rf kernel boot-original
 
-    - name: Install toolchain
+    - name: Install toolchain and dependencies
       run: |
         sudo apt update
         sudo apt install -y \
-          bc \
-          bison \
-          build-essential \
-          clang-14 \
-          flex \
-          git \
-          libncurses-dev \
-          libssl-dev \
-          lld-14 \
-          llvm-14 \
-          llvm-14-tools \
-          python3 \
-          unzip \
-          wget \
-          xz-utils
+          bc bison build-essential clang-14 flex git \
+          libncurses-dev libssl-dev lld-14 llvm-14 llvm-14-tools \
+          python3 unzip wget xz-utils
         sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
         sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
         echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
+
+    - name: Download original boot.img
+      run: |
+        mkdir -p boot-original
+        wget --header="Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+             -O boot-original/boot.zip \
+             https://github.com/usama19931993/exynos990-kernel1/releases/download/boot/boot-original.zip
+        unzip -o boot-original/boot.zip -d boot-original
 
     - name: Clone and prepare kernel
       run: |
@@ -44,14 +40,8 @@ jobs:
         git clone --depth=1 https://github.com/tiann/KernelSU.git
         mv KernelSU/kernel drivers/kernelsu
         echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+        cp ../boot-original/boot.img .
         mkdir -p out
-
-    - name: Download original boot.img
-      run: |
-        mkdir -p boot-original
-        wget -O boot-original/boot.zip https://github.com/YOUR_USER/YOUR_REPO/releases/download/YOUR_TAG/boot-original.zip
-        unzip -o boot-original/boot.zip -d boot-original
-        cp boot-original/boot.img kernel/
 
     - name: Configure kernel
       run: |
@@ -65,7 +55,7 @@ jobs:
 
         make O=out ARCH=arm64 olddefconfig
 
-    - name: Build kernel (with full logs)
+    - name: Build kernel
       run: |
         cd kernel
         make -j$(nproc) O=out ARCH=arm64 \
@@ -75,11 +65,22 @@ jobs:
           LD=ld.lld-14 \
           LLVM=1 \
           LLVM_IAS=1 \
-          KCFLAGS="-Wno-error -march=armv8.2-a" 2>&1 | tee build.log
-        exit ${PIPESTATUS[0]}
+          KCFLAGS="-Wno-error -march=armv8.2-a"
 
-    - name: Package boot image
+    - name: Package boot.img
       run: |
         cd kernel
         bash ./mkbootimg.sh
-        tar -cvf boot.tar.md5 boot.img
+
+    - name: Create Odin flashable boot.tar.md5
+      run: |
+        cd kernel
+        tar -H ustar -c boot.img > boot.tar
+        md5sum -t boot.tar | awk '{print $1}' >> boot.tar
+        mv boot.tar boot.tar.md5
+
+    - name: Upload result
+      uses: actions/upload-artifact@v4
+      with:
+        name: boot.tar.md5
+        path: kernel/boot.tar.md5
