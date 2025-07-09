@@ -8,38 +8,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout
+    - name: Checkout Repo
       uses: actions/checkout@v4
 
     - name: Clean workspace
-      run: rm -rf kernel
+      run: rm -rf kernel boot-original boot.tar.md5 boot.img
 
-    - name: Install toolchain
+    - name: Install toolchain & dependencies
       run: |
         sudo apt update
         sudo apt install -y \
-          bc \
-          bison \
-          build-essential \
-          clang-14 \
-          flex \
-          git \
-          libncurses-dev \
-          libssl-dev \
-          lld-14 \
-          llvm-14 \
-          llvm-14-tools \
-          python3 \
-          unzip \
-          wget \
-          xz-utils
+          bc bison build-essential clang-14 flex git \
+          libncurses-dev libssl-dev lld-14 llvm-14 llvm-14-tools \
+          python3 unzip wget xz-utils
         sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
         sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
         echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
 
-    - name: Clone and prepare kernel
+    - name: Clone kernel and KernelSU
       run: |
-        rm -rf kernel  # 🧹 تنظيف المجلد إذا كان موجود
         git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
         cd kernel
         git clone --depth=1 https://github.com/tiann/KernelSU.git
@@ -47,17 +34,20 @@ jobs:
         echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
         mkdir -p out
 
+    - name: Download boot.img from release
+      run: |
+        curl -L -o boot-original.zip https://github.com/usama19931993/exynos990-kernel1/releases/download/boot-original/boot-original.zip
+        unzip boot-original.zip -d boot-original
+        cp boot-original/boot.img kernel/boot.img
+
     - name: Configure kernel
       run: |
         cd kernel
         make O=out ARCH=arm64 extreme_z3s_defconfig
-        
-        # إعدادات GPU المعدلة
         ./scripts/config --file out/.config \
           --set-val CONFIG_MALI_BIFROST y \
           --set-val CONFIG_MALI_BIFROST_R38P1 n \
           --set-val CONFIG_MALI_PLATFORM_NAME "exynos"
-        
         make O=out ARCH=arm64 olddefconfig
 
     - name: Build kernel
@@ -68,12 +58,20 @@ jobs:
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
           LD=ld.lld-14 \
-          LLVM=1 \
-          LLVM_IAS=1 \
-          KCFLAGS="-Wno-error -march=armv8.2-a"
+          LLVM=1 LLVM_IAS=1 KCFLAGS="-Wno-error -march=armv8.2-a"
 
-    - name: Package image
+    - name: Build boot.img from original + new kernel
       run: |
         cd kernel
-        bash ./mkbootimg.sh
+        bash ./mkbootimg.sh  # لازم يكون يتعامل مع boot.img الأصلي الموجود
+
+    - name: Create Odin flashable tar
+      run: |
+        cd kernel
         tar -cvf boot.tar.md5 boot.img
+
+    - name: Upload boot.tar.md5
+      uses: actions/upload-artifact@v4
+      with:
+        name: boot-for-odin
+        path: kernel/boot.tar.md5
