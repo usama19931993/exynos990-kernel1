@@ -1,4 +1,4 @@
-name: Build Kernel for SM-G988B (Exynos990)
+name: Build Exynos990 Kernel with KernelSU
 
 on:
   workflow_dispatch:
@@ -8,75 +8,79 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
+    - name: Checkout source
       uses: actions/checkout@v4
 
-    - name: Clean workspace
-      run: rm -rf kernel boot-original
-
-    - name: Install dependencies & toolchain
+    - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt install -y \
-          bc bison build-essential clang-14 flex git libncurses-dev \
-          libssl-dev lld-14 llvm-14 llvm-14-tools python3 unzip wget xz-utils
-        sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
-        sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
-        echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
+        sudo apt install -y git zip unzip curl wget bc bison flex build-essential \
+          libssl-dev libncurses5-dev libncursesw5-dev clang python3 python3-pip \
+          gcc libc6-dev lib32ncurses5-dev lib32z1-dev lib32stdc++6
 
-    - name: Download original boot.img from Release
+    - name: Clone toolchain
+      run: |
+        mkdir toolchain
+        git clone --depth=1 https://github.com/mvaisakh/gcc-arm64 toolchain/arm64
+        git clone --depth=1 https://github.com/mvaisakh/gcc-arm toolchain/arm
+
+    - name: Export environment variables
+      run: |
+        export ARCH=arm64
+        export SUBARCH=arm64
+        export CROSS_COMPILE=$(pwd)/toolchain/arm64/bin/aarch64-elf-
+        export CROSS_COMPILE_ARM32=$(pwd)/toolchain/arm/bin/arm-eabi-
+        echo "ARCH=arm64" >> $GITHUB_ENV
+        echo "SUBARCH=arm64" >> $GITHUB_ENV
+        echo "CROSS_COMPILE=$(pwd)/toolchain/arm64/bin/aarch64-elf-" >> $GITHUB_ENV
+        echo "CROSS_COMPILE_ARM32=$(pwd)/toolchain/arm/bin/arm-eabi-" >> $GITHUB_ENV
+
+    - name: Clone KernelSU
+      run: |
+        git clone --depth=1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/KernelSU/KernelSU kernel/kernelSU
+
+    - name: Prepare KernelSU
+      run: |
+        cd kernel
+        KSU_VERSION=$(cat kernelSU/VERSION_KSU)
+        echo "KERNELSU_VERSION=$KSU_VERSION" >> $GITHUB_ENV
+        echo "CONFIG_KSU=y" >> kernel/configs/exynos990_defconfig
+
+    - name: Download original boot image
       run: |
         mkdir -p boot-original
         wget --header="Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
              -O boot-original/boot.zip \
-             https://github.com/usama19931993/exynos990-kernel1/releases/download/boot/boot-original.zip
+             https://github.com/usama19931993/exynos990-kernel1/releases/download/boot-original/boot-original.zip
         unzip -o boot-original/boot.zip -d boot-original
 
-    - name: Clone kernel source
+    - name: Build Kernel
       run: |
-        git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
+        make -j$(nproc) O=out ARCH=arm64 exynos990_defconfig
+        make -j$(nproc) O=out ARCH=arm64
 
-    - name: Add KernelSU
+    - name: Copy Image to anykernel
       run: |
-        git clone --depth=1 https://github.com/tiann/KernelSU.git kernel/KernelSU
-        mv kernel/KernelSU/kernel kernel/drivers/kernelsu
-        echo 'source "drivers/kernelsu/Kconfig"' >> kernel/drivers/Kconfig
+        mkdir -p anykernel
+        cp out/arch/arm64/boot/Image anykernel/
 
-    - name: Copy boot.img to kernel dir
-      run: cp boot-original/boot.img kernel/
-
-    - name: Configure kernel
+    - name: Merge with original boot.img
       run: |
-        cd kernel
-        mkdir -p out
-        make O=out ARCH=arm64 extreme_z3s_defconfig
-        ./scripts/config --file out/.config \
-          --set-val CONFIG_MALI_BIFROST y \
-          --set-val CONFIG_MALI_BIFROST_R38P1 n \
-          --set-val CONFIG_MALI_PLATFORM_NAME "exynos"
-        make O=out ARCH=arm64 olddefconfig
+        curl -Lo magiskboot https://github.com/topjohnwu/magiskboot/releases/latest/download/magiskboot-linux-x86_64
+        chmod +x magiskboot
+        ./magiskboot unpack boot-original/boot.img
+        cp out/arch/arm64/boot/Image kernel
+        ./magiskboot repack boot-original/boot.img
+        mv new-boot.img boot_patched.img
 
-    - name: Build kernel
+    - name: Package for Odin (boot.tar.md5)
       run: |
-        cd kernel
-        make -j$(nproc) O=out ARCH=arm64 \
-          CC=clang-14 \
-          CLANG_TRIPLE=aarch64-linux-gnu- \
-          CROSS_COMPILE=aarch64-linux-gnu- \
-          LD=ld.lld-14 \
-          LLVM=1 LLVM_IAS=1 \
-          KCFLAGS="-Wno-error -march=armv8.2-a"
-
-    - name: Package boot.img into tar.md5
-      run: |
-        cd kernel
-        bash ./mkbootimg.sh
-        tar -cvf boot.tar boot.img
-        md5sum -t boot.tar >> boot.tar
+        tar -H ustar -c boot_patched.img > boot.tar
+        md5sum -t boot.tar | sed 's/ .*/ /' >> boot.tar
         mv boot.tar boot.tar.md5
 
     - name: Upload boot.tar.md5
       uses: actions/upload-artifact@v4
       with:
-        name: boot.tar.md5
-        path: kernel/boot.tar.md5
+        name: boot-patched-odin
+        path: boot.tar.md5
