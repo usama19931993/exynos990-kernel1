@@ -1,98 +1,57 @@
 name: Build Kernel for SM-G988B (Exynos990)
 
 on:
-  # تعريف صريح ل workflow_dispatch مع إدخالات واضحة
-  workflow_dispatch:
-    inputs:
-      config_file:
-        description: 'Config file to use (without .config extension)'
-        required: true
-        default: 'stock_defconfig'
-      clean_build:
-        description: 'Perform clean build?'
-        required: true
-        default: true
-        type: boolean
+workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
+build:
+runs-on: ubuntu-latest
+timeout-minutes: 90  # زيادة وقت التنفيذ
 
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+steps:  
+- name: سحب ملفات المشروع  
+  uses: actions/checkout@v4  
 
-    - name: Install dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y bc bison build-essential ccache curl flex git libncurses-dev libssl-dev python3 unzip wget xz-utils
+- name: تثبيت المتطلبات  
+  run: |  
+    sudo apt update  
+    sudo apt install -y bc bison build-essential ccache curl flex git libncurses-dev libssl-dev python3 unzip wget xz-utils  
 
-    - name: Setup environment
-      run: |
-        rm -rf kernel toolchain
-        git clone --depth=1 --branch main https://github.com/usama19931993/exynos990-kernel1.git kernel
-        cd kernel
-        echo "Available config files:"
-        ls arch/arm64/configs/
+- name: تنظيف البيئة  
+  run: |  
+    rm -rf kernel toolchain  
 
-    - name: Setup KernelSU
-      run: |
-        cd kernel
-        if [ ! -d "drivers/kernelsu" ]; then
-          git submodule add https://github.com/tiann/KernelSU.git drivers/kernelsu
-          cd drivers/kernelsu && git submodule update --init && cd ../..
-          echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
-        fi
+- name: استنساخ مصدر النواة  
+  run: |  
+    git clone --depth=1 --branch main https://github.com/usama19931993/exynos990-kernel1.git kernel  
 
-    - name: Setup toolchain
-      run: |
-        git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git toolchain
-        echo "$PWD/toolchain/bin" >> $GITHUB_PATH
-        echo "CROSS_COMPILE=$PWD/toolchain/bin/aarch64-linux-android-" >> $GITHUB_ENV
+- name: إضافة KernelSU  
+  run: |  
+    cd kernel  
+    git clone --depth=1 https://github.com/tiann/KernelSU.git  
+    mv KernelSU/kernel drivers/kernelsu  
+    rm -rf KernelSU  
+    echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig  
 
-    - name: Build kernel
-      run: |
-        cd kernel
-        if ${{ inputs.clean_build }}; then
-          make O=out ARCH=arm64 clean
-          make O=out ARCH=arm64 mrproper
-        fi
-        
-        echo "Using config: ${{ inputs.config_file }}"
-        cp arch/arm64/configs/${{ inputs.config_file }} arch/arm64/configs/temp_defconfig
-        echo "CONFIG_KSU=y" >> arch/arm64/configs/temp_defconfig
-        echo "CONFIG_KSU_DEBUG=y" >> arch/arm64/configs/temp_defconfig
-        
-        make O=out ARCH=arm64 temp_defconfig
-        make -j$(($(nproc)*2)) O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- CC="ccache aarch64-linux-android-gcc" 2>&1 | tee build.log
+- name: إعداد أداة التجميع (Toolchain)  
+  run: |  
+    # المحاولة مع روابط بديلة  
+    git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git toolchain || \  
+    git clone --depth=1 https://github.com/bgcngm/aarch64-linux-android-4.9.git toolchain || \  
+    git clone --depth=1 git://github.com/bgcngm/aarch64-linux-android-4.9.git toolchain  
+      
+    if [ -d "toolchain" ]; then  
+      echo "$PWD/toolchain/bin" >> $GITHUB_PATH  
+      echo "CROSS_COMPILE=$PWD/toolchain/bin/aarch64-linux-android-" >> $GITHUB_ENV  
+      echo "PATH=$PWD/toolchain/bin:$PATH" >> $GITHUB_ENV  
+    else  
+      echo "❌ فشل في الحصول على أداة التجميع!"  
+      exit 1  
+    fi  
 
-    - name: Package boot image
-      run: |
-        cd kernel
-        if [ ! -f "mkbootimg.sh" ]; then
-          cat > mkbootimg.sh <<'EOL'
-#!/bin/bash
-./tools/mkbootimg \
-  --kernel out/arch/arm64/boot/Image \
-  --ramdisk out/ramdisk.cpio \
-  --cmdline "console=ttyS0,115200n8" \
-  --base 0x10000000 \
-  --pagesize 2048 \
-  --os_version 11.0.0 \
-  --os_patch_level 2025-07 \
-  -o boot.img
-EOL
-          chmod +x mkbootimg.sh
-        fi
-        bash ./mkbootimg.sh
-        tar -cvf boot.tar.md5 boot.img
+- name: تهيئة ccache  
+  run: |  
+    echo "/usr/bin/ccache" >> $GITHUB_PATH  
+    echo "CCACHE_DIR=$GITHUB_WORKSPACE/ccache" >> $GITHUB_ENV  
+    mkdir -p $GITHUB_WORKSPACE/ccache
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: kernel-build-${{ github.run_number }}
-        path: |
-          kernel/boot.tar.md5
-          kernel/build.log
-          kernel/out/.config
