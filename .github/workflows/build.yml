@@ -1,53 +1,6 @@
-name: Build Exynos990 Kernel with KernelSU
-
-on:
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    env:
-      KSU_BRANCH: main
-
-    steps:
-    - name: Checkout Kernel Source
-      uses: actions/checkout@v3
-
-    - name: Set up Dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y git zip unzip curl wget bc bison flex build-essential \
-          libssl-dev libncurses-dev libncursesw5-dev clang python3 python3-pip \
-          gcc libc6-dev lib32z1-dev lib32stdc++6
-
-    - name: Clone KernelSU
-      run: git clone --depth=1 -b $KSU_BRANCH https://github.com/KernelSU/KernelSU kernel/kernelSU
-
-    - name: Download and extract original boot.img
-      run: |
-        mkdir -p boot-original
-        wget --header="Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-          -O boot-original/boot.zip \
-          https://github.com/usama19931993/exynos990-kernel1/releases/download/boot/boot-original.zip
-        unzip -o boot-original/boot.zip -d boot-original
-        cp boot-original/boot.img kernel/
-
-    - name: Build Kernel
-      run: |
-        cd kernel
-        # استبدل هذا بسطر البناء الخاص بك (مثال):
-        make -j$(nproc)
-
-    - name: Package boot.img to boot.tar.md5
-      run: |
-        cd kernel
-        tar -H ustar -c boot.img > boot.tar
-        md5sum -t boot.tar >> boot.tar
-        mv boot.tar boot.tar.md5
-
-    - name: Upload boot.tar.md5
-      uses: actions/upload-artifact@v4
-      with:
-        name: boot.tar.md5
-        path: kernel/boot.tar.md5
+mkdir -p boot-original
+wget --header="Authorization: token ***" \
+  -O boot-original/boot.zip \
+  https://github.com/usama19931993/exynos990-kernel1/releases/download/v1/boot-original.zip
+unzip -o boot-original/boot.zip -d boot-original
+cp boot-original/boot.img kernel/
