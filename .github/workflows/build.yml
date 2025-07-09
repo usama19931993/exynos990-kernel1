@@ -1,84 +1,50 @@
 name: Build Kernel for SM-G988B (Exynos990)
 
-on: workflow_dispatch:
+on:
+  workflow_dispatch:
 
-jobs: build: runs-on: ubuntu-latest
+jobs:
+  build:
+    runs-on: ubuntu-latest
 
-steps:
-- name: Checkout repository
-  uses: actions/checkout@v4
+    steps:
+    - name: Checkout dummy repo
+      uses: actions/checkout@v4
 
-- name: Install dependencies
-  run: |
-    sudo apt update
-    sudo apt install -y \
-      bc bison build-essential clang-14 flex git libncurses-dev libssl-dev \
-      lld-14 llvm-14 llvm-14-tools python3 unzip wget xz-utils zip
-    sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
-    sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
-    echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y bc bison build-essential curl flex git libncurses-dev libssl-dev python3 unzip wget xz-utils
 
-- name: Clone kernel source
-  run: |
-    git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
+    - name: Clone kernel source into kernel/ folder
+      run: git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
 
-- name: Clone and integrate KernelSU
-  run: |
-    cd kernel
-    git clone --depth=1 https://${{ secrets.GH_TOKEN }}@github.com/KernelSU/KernelSU.git kernelSU || \
-      git clone --depth=1 https://github.com/KernelSU/KernelSU.git kernelSU
-    mkdir -p drivers/kernelsu
-    cp -r kernelSU/kernel/* drivers/kernelsu/
-    echo 'obj-y += kernelsu/' >> drivers/Makefile
-    echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+    - name: Clone KernelSU and move into drivers/kernelsu
+      run: |
+        cd kernel
+        git clone --depth=1 https://github.com/tiann/KernelSU.git
+        mv KernelSU/kernel drivers/kernelsu
 
-- name: Prepare environment
-  run: |
-    cd kernel
-    mkdir -p out
-    make O=out ARCH=arm64 extreme_z3s_defconfig
+    - name: Append KernelSU Kconfig to drivers/Kconfig
+      run: echo 'source "drivers/kernelsu/Kconfig"' >> kernel/drivers/Kconfig
 
-- name: Build Kernel
-  run: |
-    cd kernel
-    make -j$(nproc) O=out ARCH=arm64 \
-      CC=clang-14 \
-      CLANG_TRIPLE=aarch64-linux-gnu- \
-      CROSS_COMPILE=aarch64-linux-gnu- \
-      LD=ld.lld-14 \
-      LLVM=1 \
-      LLVM_IAS=1 \
-      KCFLAGS="-Wno-error"
+    - name: Download and extract proper toolchain
+      run: |
+        mkdir -p toolchain
+        cd toolchain
+        wget https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/heads/master.tar.gz -O toolchain.tar.gz
+        tar -xzf toolchain.tar.gz
+        echo "CROSS_COMPILE=$(pwd)/aarch64-linux-android-" >> $GITHUB_ENV
+        echo "PATH=$(pwd):$PATH" >> $GITHUB_ENV
 
-- name: Download original boot.img
-  run: |
-    cd kernel
-    wget -O boot-original.zip https://github.com/usama19931993/exynos990-kernel1/releases/download/boot-original/boot-original.zip
-    unzip boot-original.zip
+    - name: Build the kernel
+      run: |
+        cd kernel
+        make O=out ARCH=arm64 g988_defconfig
+        make -j$(nproc) O=out ARCH=arm64
 
-- name: Repack boot.img with new kernel
-  run: |
-    cd kernel
-    mkdir tools
-    wget https://android.googlesource.com/platform/system/tools/mkbootimg/+/refs/heads/master/mkbootimg.py?format=TEXT -O tools/mkbootimg.b64
-    base64 -d tools/mkbootimg.b64 > tools/mkbootimg.py
-    chmod +x tools/mkbootimg.py
-
-    # استبدل القيم أدناه إن لزم حسب جهازك
-    export BASE_ADDR=0x10000000
-    export PAGE_SIZE=2048
-    export KERNEL_IMG=out/arch/arm64/boot/Image
-
-    python3 tools/mkbootimg.py \
-      --kernel $KERNEL_IMG \
-      --base $BASE_ADDR \
-      --pagesize $PAGE_SIZE \
-      --ramdisk boot.img \
-      --output new-boot.img
-
-- name: Upload artifact
-  uses: actions/upload-artifact@v4
-  with:
-    name: kernel-boot
-    path: kernel/new-boot.img
-
+    - name: Pack boot.img into boot.tar.md5
+      run: |
+        cd kernel
+        bash ./mkbootimg.sh
+        tar -cvf boot.tar.md5 boot.img
