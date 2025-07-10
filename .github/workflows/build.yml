@@ -1,79 +1,92 @@
-name: Build Kernel for SM-G988B (Exynos990)
+#!/bin/bash
 
-on:
-  workflow_dispatch:
+# تأكد من أن المستخدم root
+if [ "$(id -u)" != "0" ]; then
+   echo "هذا السكربت يتطلب صلاحيات root. الرجاء التشغيل باستخدام sudo." 
+   exit 1
+fi
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+# تثبيت التبعيات المطلوبة
+echo "جاري تثبيت التبعيات المطلوبة..."
+apt update && apt install -y \
+    bc bison build-essential clang flex git libncurses-dev \
+    libssl-dev lld llvm llvm-tools python3 unzip wget xz-utils \
+    android-sdk-libsparse-utils android-sdk-ext4-utils
 
-    steps:
-    - name: Checkout source
-      uses: actions/checkout@v4
+# إنشاء مجلد العمل
+WORK_DIR="kernel_build"
+mkdir -p $WORK_DIR
+cd $WORK_DIR || exit
 
-    - name: Clean workspace
-      run: rm -rf kernel Image build.log
+# 1. استنساخ مصدر Kernel
+echo "جاري استنساخ مصدر Kernel..."
+git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
+cd kernel || exit
 
-    - name: Install dependencies & toolchain
-      run: |
-        sudo apt update
-        sudo apt install -y \
-          bc bison build-essential clang-14 flex git libncurses-dev \
-          libssl-dev lld-14 llvm-14 llvm-14-tools python3 unzip wget xz-utils
-        sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
-        sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
-        echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
+# 2. دمج KernelSU
+echo "جاري دمج KernelSU..."
+git clone --depth=1 https://github.com/tiann/KernelSU.git
+if [ ! -d "KernelSU" ]; then
+   echo "❌ فشل في استنساخ KernelSU"
+   exit 1
+fi
 
-    - name: Clone kernel source and integrate KernelSU
-      run: |
-        git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
-        cd kernel
-        git clone --depth=1 https://github.com/tiann/KernelSU.git kernelSU
-        rm -rf kernelSU/.git
-        cp -rvf kernelSU/* .
-        mkdir -p drivers/kernelsu
-        cp -r kernelSU/kernel/* drivers/kernelsu/
-        echo 'obj-y += kernelsu/' >> drivers/Makefile
-        echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
-        mkdir -p out
+# تكامل KernelSU مع Kernel
+rm -rf KernelSU/.git
+cp -rvf KernelSU/* .
+mkdir -p drivers/kernelsu
+cp -r KernelSU/kernel/* drivers/kernelsu/
+echo 'obj-y += kernelsu/' >> drivers/Makefile
+echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
 
-    - name: Configure kernel (non-interactive)
-      run: |
-        cd kernel
-        make O=out ARCH=arm64 extreme_z3s_defconfig
-        yes "" | make O=out ARCH=arm64 olddefconfig
-        ./scripts/config --file out/.config \
-          --set-val CONFIG_MALI_BIFROST y \
-          --set-val CONFIG_MALI_BIFROST_R38P1 n \
-          --set-val CONFIG_MALI_PLATFORM_NAME "exynos"
-        make O=out ARCH=arm64 olddefconfig
+# 3. تهيئة Kernel
+echo "جاري تهيئة Kernel..."
+make ARCH=arm64 extreme_z3s_defconfig
+yes "" | make ARCH=arm64 olddefconfig
 
-    - name: Build kernel with logging
-      run: |
-        cd kernel
-        make -j$(nproc) O=out ARCH=arm64 \
-          CC=clang-14 \
-          CLANG_TRIPLE=aarch64-linux-gnu- \
-          CROSS_COMPILE=aarch64-linux-gnu- \
-          LD=ld.lld-14 \
-          LLVM=1 \
-          LLVM_IAS=1 \
-          KCFLAGS="-Wno-error -march=armv8.2-a" \
-          V=1 \
-          2>&1 | tee ../build.log || (echo "❌ Build failed. Showing last 200 lines:" && tail -n 200 ../build.log && exit 1)
+# 4. بناء Kernel
+echo "جاري بناء Kernel (قد تستغرق هذه العملية وقتًا)..."
+make -j$(nproc) ARCH=arm64 \
+    CC=clang \
+    CLANG_TRIPLE=aarch64-linux-gnu- \
+    CROSS_COMPILE=aarch64-linux-gnu- \
+    LD=ld.lld \
+    LLVM=1 \
+    LLVM_IAS=1
 
-    - name: Copy built Image
-      run: cp kernel/out/arch/arm64/boot/Image Image
+# التحقق من نجاح البناء
+if [ ! -f "arch/arm64/boot/Image" ]; then
+    echo "❌ فشل بناء Kernel"
+    exit 1
+fi
 
-    - name: Upload Image to GitHub Releases
-      uses: softprops/action-gh-release@v2
-      if: success()
-      with:
-        files: Image
-        tag_name: auto-build-${{ github.run_number }}
-        name: Auto Build ${{ github.run_number }}
-        body: |
-          ✅ Built kernel Image for SM-G988B (Exynos990) with KernelSU
-          📦 You can repack it with your own boot.img locally.
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+# 5. تحضير boot.img
+echo "جاري تحضير boot.img..."
+cd ..
+wget https://github.com/topjohnwu/Magisk/releases/latest/download/magiskboot -O magiskboot
+chmod +x magiskboot
+
+# استخراج boot.img الأصلي
+wget https://github.com/usama19931993/exynos990-kernel1/releases/download/boot-original/boot-original.zip
+unzip boot-original.zip
+
+# تعديل boot.img
+echo "جاري تعديل boot.img مع Kernel الجديد..."
+./magiskboot unpack boot.img
+cp kernel/arch/arm64/boot/Image kernel
+./magiskboot repack boot.img
+
+# التحقق من الناتج
+if [ ! -f "new-boot.img" ]; then
+    echo "❌ فشل في إنشاء boot.img جديد"
+    exit 1
+fi
+
+mv new-boot.img modified_boot.img
+
+echo "✅ تم الانتهاء بنجاح!"
+echo "يمكنك العثور على boot.img المعدل في: $(pwd)/modified_boot.img"
+echo "لرفعه إلى الجهاز استخدم:"
+echo "adb push modified_boot.img /sdcard/"
+echo "ثم flashه باستخدام:"
+echo "fastboot flash boot /sdcard/modified_boot.img"
