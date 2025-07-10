@@ -123,4 +123,59 @@ jobs:
         set -o pipefail
         make -j$(($(nproc)+1)) O=$OUT_DIR ARCH=arm64 \
           CC="ccache clang-14" \
-          CLANG_TRIPLE=aarch64-linux-gnu-
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          LD=ld.lld-14 \
+          LLVM=1 \
+          LLVM_IAS=1 \
+          KCFLAGS="-Wno-error -march=armv8.2-a" 2>&1 | tee build.log
+        
+        if [ ! -f "$OUT_DIR/arch/arm64/boot/Image" ]; then
+          echo "::error::Kernel build failed! Last 50 lines:"
+          tail -n 50 build.log
+          exit 1
+        fi
+
+    - name: Package boot image
+      run: |
+        wget $BOOT_ORIGINAL_URL -O boot-original.zip
+        unzip boot-original.zip
+        
+        wget https://github.com/topjohnwu/Magisk/releases/download/v27.0/magiskboot -O magiskboot
+        chmod +x magiskboot
+        
+        ./magiskboot unpack boot.img
+        cp $KERNEL_DIR/$OUT_DIR/arch/arm64/boot/Image kernel
+        ./magiskboot repack boot.img
+        mv new-boot.img modified_boot.img
+        tar -H ustar -cvf boot.tar.md5 modified_boot.img
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: boot-images
+        path: |
+          modified_boot.img
+          boot.tar.md5
+        retention-days: 3
+
+    - name: Create release
+      if: success()
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          modified_boot.img
+          boot.tar.md5
+        tag_name: boot-${{ github.run_number }}
+        body: |
+          ### Kernel Build Summary
+          - **Device**: SM-G988B (Exynos990)
+          - **KernelSU Version**: ${{ inputs.ksu_version }}
+          - **Build Date**: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+          
+          ### Flash Instructions
+          1. **Odin**: Flash `boot.tar.md5` in AP slot
+          2. **Fastboot**: 
+          ```bash
+          fastboot flash boot modified_boot.img
+          ```
