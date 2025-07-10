@@ -1,6 +1,5 @@
 name: Build Kernel for SM-G988B (Exynos990)
 
-# ✅ هذا التعديل يضمن ظهور زر Run workflow
 on:
   workflow_dispatch:
 
@@ -67,14 +66,14 @@ jobs:
           echo "📂 Listing all output files to help locate 'Image'..."
           find kernel/out -type f | tee output-files.txt
 
-      - name: Copy built Image for upload
+      - name: Copy built Image or Image.gz for upload
         run: |
-          IMAGE_PATH=$(find kernel/out -type f -name Image | head -n 1)
+          IMAGE_PATH=$(find kernel/out -type f \( -name Image -o -name 'Image.*' \) | head -n 1)
           if [ -f "$IMAGE_PATH" ]; then
             cp "$IMAGE_PATH" Image
-            echo "✅ Found Image at $IMAGE_PATH"
+            echo "✅ Found kernel image at $IMAGE_PATH"
           else
-            echo "❌ File 'Image' not found! Build may have failed."
+            echo "❌ Kernel image not found! Build may have failed."
             exit 1
           fi
 
