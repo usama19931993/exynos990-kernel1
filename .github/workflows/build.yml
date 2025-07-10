@@ -30,7 +30,6 @@ jobs:
           cd kernel
           git clone https://github.com/tiann/KernelSU.git kernelSU
           rm -rf kernelSU/.git
-          mkdir -p drivers/kernelsu
           cp -r kernelSU/kernel/* drivers/kernelsu/
           echo 'obj-y += kernelsu/' >> drivers/Makefile
           echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
@@ -60,6 +59,9 @@ jobs:
             KCFLAGS="-Wno-error -march=armv8.2-a" \
             V=1 \
             2>&1 | tee ../build.log || (echo "❌ Build failed. Showing last 200 lines:" && tail -n 200 ../build.log && exit 1)
+
+      - name: List output files for debug
+        run: ls -R kernel/out/arch/arm64/boot || echo "❌ Directory not found"
 
       - name: Copy built Image for upload
         run: |
