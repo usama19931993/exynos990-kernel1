@@ -1,11 +1,12 @@
 name: Build Kernel for SM-G988B (Exynos990)
 
+# ✅ هذا التعديل يضمن ظهور زر Run workflow
 on:
   workflow_dispatch:
 
 jobs:
-build:
-runs-on: ubuntu-latest
+  build:
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout source
@@ -61,13 +62,10 @@ runs-on: ubuntu-latest
             V=1 \
             2>&1 | tee ../build.log || (echo "❌ Build failed. Showing last 200 lines:" && tail -n 200 ../build.log && exit 1)
 
-      - name: Debug: Print build log & search for Image
+      - name: Debug: List all build output files
         run: |
-          echo "📂 Searching for Image file..."
-          find kernel/out -type f -name Image || echo "❌ No Image file found"
-          
-          echo -e "\n🧾 Showing last 200 lines of build.log"
-          tail -n 200 build.log || echo "⚠️ build.log not found"
+          echo "📂 Listing all output files to help locate 'Image'..."
+          find kernel/out -type f | tee output-files.txt
 
       - name: Copy built Image for upload
         run: |
