@@ -31,7 +31,7 @@ jobs:
         git clone https://github.com/tiann/KernelSU.git kernelSU
         cd kernelSU
         git fetch --tags
-        git checkout tags/v0.6.5 -b tmp-ksu
+        git checkout v0.6.5
         cd ..
         rm -rf kernelSU/.git
         mkdir -p drivers/kernelsu
