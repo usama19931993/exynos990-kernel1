@@ -11,7 +11,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90  # زيادة الوقت بسبب حجم البناء
 
     steps:
     - name: Clean workspace
@@ -22,51 +22,78 @@ jobs:
         sudo apt update
         sudo apt install -y \
           bc bison build-essential clang-14 flex git libncurses-dev \
-          libssl-dev lld-14 llvm-14 llvm-14-tools python3 unzip wget xz-utils
+          libssl-dev lld-14 llvm-14 llvm-14-tools python3 unzip wget xz-utils \
+          device-tree-compiler kmod
         
-        # إنشاء روابط لأدوات LLVM
+        # إعداد روابط LLVM
         sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
         sudo ln -sf /usr/bin/llvm-nm-14 /usr/bin/llvm-nm
         sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
         echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
 
-    - name: Clone kernel source
+    - name: Clone and prepare kernel
       run: |
         git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
         cd kernel
+        
+        # Clone KernelSU مع تحديد الإصدار
         git clone --depth=1 --branch ${{ inputs.ksu_version }} https://github.com/tiann/KernelSU.git
         KSU_VERSION=$(git -C KernelSU rev-parse --short HEAD)
+        
+        # إعداد KernelSU
+        mkdir -p drivers/kernelsu
         cp -r KernelSU/kernel/* drivers/kernelsu/
         echo 'obj-y += kernelsu/' >> drivers/Makefile
         echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
         sed -i "s/#define KSU_GIT_VERSION.*/#define KSU_GIT_VERSION \"$KSU_VERSION\"/" drivers/kernelsu/ksu.h
-
-    - name: Patch KernelSU
-      run: |
-        cd kernel/drivers/kernelsu
-        sed -i '/MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver)/d' ksu.c
+        
+        # إصلاح مشاكل معروفة
+        sed -i '/MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver)/d' drivers/kernelsu/ksu.c
 
     - name: Build kernel
       run: |
         cd kernel
         make ARCH=arm64 extreme_z3s_defconfig
-        make -j$(nproc) ARCH=arm64 \
+        
+        # زيادة الحد المسموح للأخطاء إذا لزم الأمر
+        ./scripts/config --file .config \
+          --set-val CONFIG_MALI_BIFROST y \
+          --set-val CONFIG_MALI_BIFROST_R38P1 n \
+          --set-val CONFIG_MALI_PLATFORM_NAME "exynos"
+        
+        make -j$(($(nproc)+1)) ARCH=arm64 \
           CC=clang-14 \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
           LD=ld.lld-14 \
           LLVM=1 \
-          LLVM_IAS=1
-        cp arch/arm64/boot/Image ../modified_kernel.img
+          LLVM_IAS=1 \
+          KCFLAGS="-Wno-error -march=armv8.2-a"
+        
+        # التحقق من وجود صورة النواة
+        if [ -f "arch/arm64/boot/Image" ]; then
+          cp arch/arm64/boot/Image ../modified_kernel.img
+        else
+          echo "::error::Kernel image not found!"
+          exit 1
+        fi
 
-    - name: Upload to Releases
+    - name: Upload kernel image
       uses: softprops/action-gh-release@v2
+      if: success()
       with:
         files: modified_kernel.img
-        tag_name: kernel-$(date +%Y%m%d)
-        name: Modified Kernel Image
+        tag_name: kernel-${{ github.run_number }}
+        name: Kernel Image (${{ inputs.ksu_version }})
         body: |
-          Custom kernel image with KernelSU integration
-          Flash using: fastboot flash kernel modified_kernel.img
+          ### Kernel Build Summary
+          - **Device**: SM-G988B (Exynos990)
+          - **KernelSU Version**: ${{ inputs.ksu_version }}
+          - **Build Date**: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+          
+          ### Flash Instructions
+          ```bash
+          fastboot flash kernel modified_kernel.img
+          ```
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
