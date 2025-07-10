@@ -12,7 +12,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Clean workspace
-      run: rm -rf kernel build.log
+      run: rm -rf kernel out build.log Image
 
     - name: Install dependencies & toolchain
       run: |
@@ -24,7 +24,7 @@ jobs:
         sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
         echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
 
-    - name: Clone kernel source and integrate KernelSU
+    - name: Clone kernel source and KernelSU
       run: |
         git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
         cd kernel
@@ -44,7 +44,6 @@ jobs:
       run: |
         cd kernel
         make O=out ARCH=arm64 extreme_z3s_defconfig
-        yes "" | make O=out ARCH=arm64 olddefconfig
         ./scripts/config --file out/.config \
           --set-val CONFIG_MALI_BIFROST y \
           --set-val CONFIG_MALI_BIFROST_R38P1 n \
@@ -62,18 +61,18 @@ jobs:
           LLVM=1 \
           LLVM_IAS=1 \
           KCFLAGS="-Wno-error -march=armv8.2-a" \
-          V=1 \
-          2>&1 | tee ../build.log || (echo "❌ Build failed. Showing last 200 lines:" && tail -n 200 ../build.log && exit 1)
+          V=1 2>&1 | tee ../build.log
+        cp out/arch/arm64/boot/Image ../../Image || exit 1
 
-    - name: Upload kernel Image to GitHub Releases
+    - name: Upload Image to GitHub Releases
       uses: softprops/action-gh-release@v2
       if: success()
       with:
-        files: kernel/out/arch/arm64/boot/Image
-        tag_name: auto-build-${{ github.run_number }}
-        name: Auto Build ${{ github.run_number }}
+        files: Image
+        tag_name: auto-kernel-${{ github.run_number }}
+        name: Kernel Image Build ${{ github.run_number }}
         body: |
-          ✅ Kernel Image built successfully for SM-G988B (Exynos990) with KernelSU
-          📦 Use Termux or any local tools to repack manually.
+          ✅ Image built for SM-G988B (Exynos990) with KernelSU v0.6.5
+          🔧 Ready for manual merging with boot.img via Termux or local tools.
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
