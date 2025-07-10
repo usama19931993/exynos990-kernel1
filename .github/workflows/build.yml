@@ -1,13 +1,23 @@
-name: Build Kernel for SM-G988B (Exynos990)
+
+
+```yaml
+name: Build Modified Kernel Image
 
 on:
   workflow_dispatch:
+    inputs:
+      ksu_version:
+        description: 'KernelSU version (e.g. v0.6.6)'
+        required: false
+        default: 'v0.6.6'
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
-    steps:
+
+
       - name: Checkout source
         uses: actions/checkout@v4
 
