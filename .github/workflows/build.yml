@@ -1,3 +1,4 @@
+
 name: Build Kernel Image for SM-G988B (Exynos990)
 
 on:
@@ -6,71 +7,105 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 90  # زيادة وقت التنفيذ
 
     steps:
     - name: Checkout source
       uses: actions/checkout@v4
 
     - name: Clean workspace
-      run: rm -rf kernel
+      run: |
+        rm -rf kernel Image out
 
     - name: Install dependencies & toolchain
       run: |
         sudo apt update
         sudo apt install -y \
           bc bison build-essential clang-14 flex git libncurses-dev \
-          libssl-dev lld-14 llvm-14 llvm-14-tools python3 unzip wget xz-utils
+          libssl-dev lld-14 llvm-14 llvm-14-tools python3 unzip wget xz-utils \
+          device-tree-compiler kmod libelf-dev
         sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
         sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
         echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
 
     - name: Clone kernel source and integrate KernelSU
       run: |
-        git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
+        git clone --depth=1 --branch master https://github.com/usama19931993/exynos990-kernel1.git kernel
         cd kernel
-        git clone --depth=1 https://github.com/tiann/KernelSU.git kernelSU
-        cp -r kernelSU/kernel/* drivers/kernelsu/
+        git clone --depth=1 https://github.com/tiann/KernelSU.git
+        [ -d "KernelSU" ] || { echo "::error::Failed to clone KernelSU"; exit 1; }
+        
+        # التكامل مع KernelSU
+        mkdir -p drivers/kernelsu
+        cp -r KernelSU/kernel/* drivers/kernelsu/
         echo 'obj-y += kernelsu/' >> drivers/Makefile
         echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+        
+        # إصلاح مشاكل معروفة
+        find drivers/kernelsu -type f -name "*.c" -exec sed -i 's/^#MODULE_IMPORT_NS/MODULE_IMPORT_NS/g' {} +
         mkdir -p out
-
-    - name: Fix MODULE_IMPORT_NS macro syntax
-      run: |
-        sed -i 's/^#MODULE_IMPORT_NS/MODULE_IMPORT_NS/' kernel/drivers/kernelsu/ksu.c
 
     - name: Configure kernel
       run: |
         cd kernel
         make O=out ARCH=arm64 extreme_z3s_defconfig
-        yes "" | make O=out ARCH=arm64 olddefconfig
+        
+        # تفعيل إعدادات KernelSU
         ./scripts/config --file out/.config \
+          --enable CONFIG_KSU \
           --set-val CONFIG_MALI_BIFROST y \
           --set-val CONFIG_MALI_BIFROST_R38P1 n \
           --set-val CONFIG_MALI_PLATFORM_NAME "exynos"
+          
         make O=out ARCH=arm64 olddefconfig
 
     - name: Build kernel (Image only)
       run: |
         cd kernel
-        make -j$(nproc) O=out ARCH=arm64 \
+        set -o pipefail
+        make -j$(($(nproc)+1)) O=out ARCH=arm64 \
           CC=clang-14 \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
           LD=ld.lld-14 \
           LLVM=1 \
           LLVM_IAS=1 \
-          KCFLAGS="-Wno-error -march=armv8.2-a"
+          KCFLAGS="-Wno-error -march=armv8.2-a" 2>&1 | tee build.log
+        
+        [ -f "out/arch/arm64/boot/Image" ] || { echo "::error::Kernel Image not found!"; exit 1; }
         cp out/arch/arm64/boot/Image ../Image
+
+    - name: Upload build log
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: kernel-build-log
+        path: kernel/build.log
 
     - name: Upload Image to GitHub Releases
       uses: softprops/action-gh-release@v2
       if: success()
       with:
         files: Image
-        tag_name: auto-image-${{ github.run_number }}
-        name: Kernel Image Build ${{ github.run_number }}
+        tag_name: kernel-image-${{ github.run_number }}
+        name: Kernel Image v${{ github.run_number }}
         body: |
-          ✅ Raw Image built for SM-G988B (Exynos990)
-          📂 Merge it manually into your boot.img via magiskboot.
+          ✅ Successfully built kernel Image for SM-G988B (Exynos990)
+          🔧 With KernelSU v$(grep -m1 "KSU_VERSION" kernel/drivers/kernelsu/ksu.h | cut -d '"' -f2)
+          📅 Build date: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+          
+          ### How to use:
+          1. Unpack your boot.img:
+          ```bash
+          magiskboot unpack boot.img
+          ```
+          2. Replace kernel:
+          ```bash
+          cp Image kernel
+          ```
+          3. Repack:
+          ```bash
+          magiskboot repack boot.img
+          ```
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
