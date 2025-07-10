@@ -1,177 +1,64 @@
-name: Build Complete Boot Image for SM-G988B (Exynos990)
+name: Build Modified Kernel Image
 
 on:
   workflow_dispatch:
     inputs:
       ksu_version:
-        description: 'KernelSU version/tag (e.g. v0.6.6)'
+        description: 'KernelSU version (e.g. v0.6.6)'
         required: false
         default: 'v0.6.6'
-      force_clean:
-        description: 'Force clean repository'
-        required: false
-        default: 'true'
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
-    env:
-      KERNEL_REPO: "https://github.com/usama19931993/exynos990-kernel1.git"
-      KSU_REPO: "https://github.com/tiann/KernelSU.git"
-      BOOT_ORIGINAL_URL: "https://github.com/usama19931993/exynos990-kernel1/releases/download/boot-original/boot-original.zip"
+    timeout-minutes: 60
 
     steps:
-    - name: Checkout source
-      uses: actions/checkout@v4
-
-    - name: Prepare workspace
-      run: |
-        # Cleanup based on user choice
-        if [ "${{ inputs.force_clean }}" = "true" ]; then
-          echo "Performing full clean..."
-          rm -rf kernel out Image boot.img new-boot.img modified_boot.img boot.tar.md5 boot-original*
-        else
-          echo "Keeping existing files..."
-        fi
-        
-        # Create necessary directories
-        mkdir -p kernel/drivers
+    - name: Clean workspace
+      run: rm -rf kernel out modified_kernel.img
 
     - name: Install dependencies
       run: |
         sudo apt update
         sudo apt install -y \
           bc bison build-essential clang-14 flex git libncurses-dev \
-          libssl-dev lld-14 llvm-14 llvm-14-tools python3 unzip wget xz-utils \
-          device-tree-compiler kmod libelf-dev ccache android-sdk-libsparse-utils
+          libssl-dev lld-14 llvm-14 llvm-14-tools python3 unzip wget xz-utils
 
-        sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
-        sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
-        echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
-        ccache --max-size=2G
-
-    - name: Setup kernel source
+    - name: Clone kernel source
       run: |
-        # Only clone if directory is empty or doesn't exist
-        if [ ! -d "kernel/.git" ]; then
-          echo "Cloning fresh kernel repository..."
-          git clone --depth=1 $KERNEL_REPO kernel || { echo "::error::Failed to clone kernel repository"; exit 1; }
-        else
-          echo "Updating existing repository..."
-          cd kernel
-          git fetch --depth=1 origin
-          git reset --hard origin/$(git rev-parse --abbrev-ref HEAD)
-          cd ..
-        fi
+        git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
+        cd kernel
+        git clone --depth=1 https://github.com/tiann/KernelSU.git
+        cp -r KernelSU/kernel/* drivers/kernelsu/
+        echo 'obj-y += kernelsu/' >> drivers/Makefile
+        echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
 
-    - name: Setup KernelSU
+    - name: Patch KernelSU
+      run: |
+        cd kernel/drivers/kernelsu
+        sed -i '/MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver)/d' ksu.c
+
+    - name: Build kernel
       run: |
         cd kernel
-        
-        # Clean existing KernelSU
-        rm -rf drivers/kernelsu kernelSU || true
-        
-        # Clone KernelSU with retry
-        for i in {1..3}; do
-          git clone --depth=1 $KSU_REPO kernelSU && break || sleep 5
-        done
-        
-        if [ ! -d "kernelSU" ]; then
-          echo "::error::Failed to clone KernelSU after 3 attempts"
-          exit 1
-        fi
-        
-        # Checkout specific version
-        cd kernelSU
-        if ! git checkout tags/${{ inputs.ksu_version }} 2>/dev/null; then
-          echo "::error::Requested KernelSU version (${{ inputs.ksu_version }}) not found!"
-          echo "Available versions:"
-          git tag -l | sort -V | tail -n 10
-          exit 1
-        fi
-        cd ..
-        
-        # Copy KernelSU files
-        mkdir -p drivers/kernelsu
-        cp -r kernelSU/kernel/* drivers/kernelsu/
-        
-        # Cleanup
-        rm -rf kernelSU
-
-    - name: Configure and build kernel
-      run: |
-        cd kernel
-        
-        # Apply critical patches
-        find drivers/kernelsu -name "*.c" -exec sed -i '/MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver)/d' {} +
-        
-        # Configure
-        make O=out ARCH=arm64 extreme_z3s_defconfig
-        ./scripts/config --file out/.config \
-          --enable CONFIG_KSU \
-          --set-val CONFIG_MALI_BIFROST y \
-          --set-val CONFIG_MALI_BIFROST_R38P1 n \
-          --set-val CONFIG_MALI_PLATFORM_NAME "exynos"
-        make O=out ARCH=arm64 olddefconfig
-        
-        # Build
-        set -o pipefail
-        make -j$(($(nproc)+1)) O=out ARCH=arm64 \
-          CC="ccache clang-14" \
+        make ARCH=arm64 extreme_z3s_defconfig
+        make -j$(nproc) ARCH=arm64 \
+          CC=clang-14 \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
           LD=ld.lld-14 \
           LLVM=1 \
-          LLVM_IAS=1 \
-          KCFLAGS="-Wno-error -march=armv8.2-a" 2>&1 | tee build.log
-        
-        if [ ! -f "out/arch/arm64/boot/Image" ]; then
-          echo "::error::Kernel build failed!"
-          tail -n 100 build.log
-          exit 1
-        fi
+          LLVM_IAS=1
+        cp arch/arm64/boot/Image ../modified_kernel.img
 
-    - name: Package boot image
-      run: |
-        wget $BOOT_ORIGINAL_URL -O boot-original.zip
-        unzip boot-original.zip
-        
-        wget https://github.com/topjohnwu/Magisk/releases/download/v27.0/magiskboot -O magiskboot
-        chmod +x magiskboot
-        
-        ./magiskboot unpack boot.img
-        cp kernel/out/arch/arm64/boot/Image kernel
-        ./magiskboot repack boot.img
-        mv new-boot.img modified_boot.img
-        tar -H ustar -cvf boot.tar.md5 modified_boot.img
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: boot-image
-        path: |
-          modified_boot.img
-          boot.tar.md5
-        retention-days: 3
-
-    - name: Create release
-      if: success()
+    - name: Upload to Releases
       uses: softprops/action-gh-release@v2
       with:
-        files: |
-          modified_boot.img
-          boot.tar.md5
-        tag_name: boot-${{ github.run_number }}
+        files: modified_kernel.img
+        tag_name: kernel-$(date +%Y%m%d)
+        name: Modified Kernel Image
         body: |
-          ### Successful Build
-          - **Device**: SM-G988B (Exynos990)
-          - **KernelSU**: ${{ inputs.ksu_version }}
-          - **Build Date**: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
-          
-          ### Flash Instructions
-          - **Odin**: Use `boot.tar.md5` in AP slot
-          - **Fastboot**: 
-          ```bash
-          fastboot flash boot modified_boot.img
-          ```
+          Custom kernel image with KernelSU integration
+          Flash using: fastboot flash kernel modified_kernel.img
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
