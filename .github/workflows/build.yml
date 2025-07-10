@@ -34,9 +34,9 @@ jobs:
         echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
         mkdir -p out
 
-    - name: Patch KernelSU to fix build error
+    - name: Fix MODULE_IMPORT_NS macro syntax
       run: |
-        sed -i 's/^MODULE_IMPORT_NS/#MODULE_IMPORT_NS/' kernel/drivers/kernelsu/ksu.c
+        sed -i 's/^#MODULE_IMPORT_NS/MODULE_IMPORT_NS/' kernel/drivers/kernelsu/ksu.c
 
     - name: Configure kernel
       run: |
