@@ -1,74 +1,118 @@
 name: Build Kernel for SM-G988B (Exynos990)
 
-on: workflow_dispatch:
+on:
+  workflow_dispatch:
 
-jobs: build: runs-on: ubuntu-latest
+jobs:
+  build:
+    runs-on: ubuntu-latest
 
-steps:
-- name: Checkout source
-  uses: actions/checkout@v4
+    steps:
+    - name: Checkout source
+      uses: actions/checkout@v4
 
-- name: Clean workspace
-  run: rm -rf kernel build.log
+    - name: Clean workspace
+      run: rm -rf kernel magiskboot boot-original boot.img boot.tar.md5 new-boot.img ramdisk.cpio magisk_files
 
-- name: Install dependencies & toolchain
-  run: |
-    sudo apt update
-    sudo apt install -y \
-      bc bison build-essential clang-14 flex git libncurses-dev \
-      libssl-dev lld-14 llvm-14 llvm-14-tools python3 unzip wget xz-utils
-    sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
-    sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
-    echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
+    - name: Install dependencies & toolchain
+      run: |
+        sudo apt update
+        sudo apt install -y \
+          bc bison build-essential clang-14 flex git libncurses-dev \
+          libssl-dev lld-14 llvm-14 llvm-14-tools python3 unzip wget xz-utils curl
+        sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
+        sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
+        echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
 
-- name: Clone kernel source and integrate KernelSU
-  run: |
-    git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
-    cd kernel
-    git clone --depth=1 https://github.com/tiann/KernelSU.git kernelSU
-    rm -rf kernelSU/.git
-    cp -rvf kernelSU/* .
-    mkdir -p drivers/kernelsu
-    cp -r kernelSU/kernel/* drivers/kernelsu/
-    echo 'obj-y += kernelsu/' >> drivers/Makefile
-    echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
-    mkdir -p out
+    - name: Clone kernel source and integrate KernelSU
+      run: |
+        git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
+        cd kernel
+        git clone --depth=1 https://github.com/tiann/KernelSU.git kernelSU
+        rm -rf kernelSU/.git
+        cp -rvf kernelSU/* .
+        mkdir -p drivers/kernelsu
+        cp -r kernelSU/kernel/* drivers/kernelsu/
+        echo 'obj-y += kernelsu/' >> drivers/Makefile
+        echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+        mkdir -p out
 
-- name: Configure kernel (non-interactive)
-  run: |
-    cd kernel
-    make O=out ARCH=arm64 extreme_z3s_defconfig
-    yes "" | make O=out ARCH=arm64 olddefconfig
-    ./scripts/config --file out/.config \
-      --set-val CONFIG_MALI_BIFROST y \
-      --set-val CONFIG_MALI_BIFROST_R38P1 n \
-      --set-val CONFIG_MALI_PLATFORM_NAME "exynos"
-    make O=out ARCH=arm64 olddefconfig
+    - name: Configure kernel (non-interactive)
+      run: |
+        cd kernel
+        make O=out ARCH=arm64 extreme_z3s_defconfig
+        yes "" | make O=out ARCH=arm64 olddefconfig
+        ./scripts/config --file out/.config \
+          --set-val CONFIG_MALI_BIFROST y \
+          --set-val CONFIG_MALI_BIFROST_R38P1 n \
+          --set-val CONFIG_MALI_PLATFORM_NAME "exynos"
+        make O=out ARCH=arm64 olddefconfig
 
-- name: Build kernel with logging
-  run: |
-    cd kernel
-    make -j$(nproc) O=out ARCH=arm64 \
-      CC=clang-14 \
-      CLANG_TRIPLE=aarch64-linux-gnu- \
-      CROSS_COMPILE=aarch64-linux-gnu- \
-      LD=ld.lld-14 \
-      LLVM=1 \
-      LLVM_IAS=1 \
-      KCFLAGS="-Wno-error -march=armv8.2-a" \
-      V=1 \
-      2>&1 | tee ../build.log || (echo "❌ Build failed. Showing last 200 lines:" && tail -n 200 ../build.log && exit 1)
+    - name: Build kernel with logging
+      run: |
+        cd kernel
+        make -j$(nproc) O=out ARCH=arm64 \
+          CC=clang-14 \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          LD=ld.lld-14 \
+          LLVM=1 \
+          LLVM_IAS=1 \
+          KCFLAGS="-Wno-error -march=armv8.2-a" \
+          V=1 \
+          2>&1 | tee ../build.log || (echo "❌ Build failed. Showing last 200 lines:" && tail -n 200 ../build.log && exit 1)
 
-- name: Upload Image to GitHub Releases
-  uses: softprops/action-gh-release@v2
-  if: success()
-  with:
-    files: kernel/out/arch/arm64/boot/Image
-    tag_name: kernel-image-${{ github.run_number }}
-    name: Kernel Image Build ${{ github.run_number }}
-    body: |
-      ✅ Raw kernel Image built for SM-G988B (Exynos990) with KernelSU.
-      ⚠️ Not packed into boot.img. Use manual packing tools if needed.
-  env:
-    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Download and unpack original boot.img
+      run: |
+        wget https://github.com/usama19931993/exynos990-kernel1/releases/download/boot-original/boot-original.zip -O boot-original.zip
+        unzip boot-original.zip -d boot-original
+        cp boot-original/boot.img .
 
+    - name: Download and setup magiskboot (primary method)
+      id: magiskboot_setup
+      run: |
+        # الطريقة الأساسية: تحميل من آخر إصدار CI
+        wget https://nightly.link/topjohnwu/Magisk/workflows/main/master/magiskboot.zip -O magiskboot.zip ||
+        (echo "⚠️ Failed to download from nightly.link, trying alternative..." && exit 1)
+        
+        unzip magiskboot.zip -d magisk_files
+        find magisk_files -name "magiskboot*" -exec cp {} magiskboot \;
+        chmod +x magiskboot
+        ./magiskboot --version || (echo "❌ magiskboot verification failed" && exit 1)
+        echo "magiskboot_version=nightly" >> $GITHUB_ENV
+
+    - name: Setup magiskboot (fallback method)
+      if: steps.magiskboot_setup.outcome != 'success'
+      run: |
+        # الطريقة الاحتياطية: بناء من المصدر
+        echo "🔄 Falling back to building from source..."
+        git clone https://github.com/topjohnwu/Magisk.git --depth=1
+        cd Magisk/native
+        ./build.sh
+        cp out/magiskboot ../../
+        cd ../../
+        chmod +x magiskboot
+        ./magiskboot --version || (echo "❌ magiskboot verification failed" && exit 1)
+        echo "magiskboot_version=built_from_source" >> $GITHUB_ENV
+
+    - name: Repack boot.img with new kernel
+      run: |
+        ./magiskboot unpack boot.img
+        cp kernel/out/arch/arm64/boot/Image kernel/Image
+        ./magiskboot repack boot.img
+        mv new-boot.img boot.img
+        tar -cvf boot.tar.md5 boot.img
+
+    - name: Upload boot.tar.md5 to GitHub Releases
+      uses: softprops/action-gh-release@v2
+      if: success()
+      with:
+        files: boot.tar.md5
+        tag_name: auto-build-${{ github.run_number }}
+        name: Auto Build ${{ github.run_number }}
+        body: |
+          ✅ Built and repacked for SM-G988B (Exynos990) with KernelSU
+          🔧 Ready for flashing via Odin.
+          🔄 Magiskboot version: ${{ env.magiskboot_version }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
