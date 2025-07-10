@@ -1,64 +1,92 @@
-name: Build Modified Kernel Image
+name: Build Kernel for SM-G988B (Exynos990)
 
 on:
   workflow_dispatch:
-    inputs:
-      ksu_version:
-        description: 'KernelSU version (e.g. v0.6.6)'
-        required: false
-        default: 'v0.6.6'
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
 
     steps:
-    - name: Clean workspace
-      run: rm -rf kernel out modified_kernel.img
+      - name: Checkout source
+        uses: actions/checkout@v4
 
-    - name: Install dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y \
-          bc bison build-essential clang-14 flex git libncurses-dev \
-          libssl-dev lld-14 llvm-14 llvm-14-tools python3 unzip wget xz-utils
+      - name: Clean workspace
+        run: rm -rf kernel out
 
-    - name: Clone kernel source
-      run: |
-        git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
-        cd kernel
-        git clone --depth=1 https://github.com/tiann/KernelSU.git
-        cp -r KernelSU/kernel/* drivers/kernelsu/
-        echo 'obj-y += kernelsu/' >> drivers/Makefile
-        echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+      - name: Install dependencies & toolchain
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            bc bison build-essential clang-14 flex git libncurses-dev \
+            libssl-dev lld-14 llvm-14 llvm-14-tools python3 unzip wget xz-utils
+          sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
+          sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
+          echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
 
-    - name: Patch KernelSU
-      run: |
-        cd kernel/drivers/kernelsu
-        sed -i '/MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver)/d' ksu.c
+      - name: Clone kernel source and integrate KernelSU
+        run: |
+          git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
+          cd kernel
+          git clone https://github.com/tiann/KernelSU.git kernelSU
+          rm -rf kernelSU/.git
+          mkdir -p drivers/kernelsu
+          cp -r kernelSU/kernel/* drivers/kernelsu/
+          echo 'obj-y += kernelsu/' >> drivers/Makefile
+          echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+          mkdir -p out
 
-    - name: Build kernel
-      run: |
-        cd kernel
-        make ARCH=arm64 extreme_z3s_defconfig
-        make -j$(nproc) ARCH=arm64 \
-          CC=clang-14 \
-          CLANG_TRIPLE=aarch64-linux-gnu- \
-          CROSS_COMPILE=aarch64-linux-gnu- \
-          LD=ld.lld-14 \
-          LLVM=1 \
-          LLVM_IAS=1
-        cp arch/arm64/boot/Image ../modified_kernel.img
+      - name: Configure kernel (non-interactive)
+        run: |
+          cd kernel
+          make O=out ARCH=arm64 extreme_z3s_defconfig
+          yes "" | make O=out ARCH=arm64 olddefconfig
+          ./scripts/config --file out/.config \
+            --set-val CONFIG_MALI_BIFROST y \
+            --set-val CONFIG_MALI_BIFROST_R38P1 n \
+            --set-val CONFIG_MALI_PLATFORM_NAME "exynos"
+          make O=out ARCH=arm64 olddefconfig
 
-    - name: Upload to Releases
-      uses: softprops/action-gh-release@v2
-      with:
-        files: modified_kernel.img
-        tag_name: kernel-$(date +%Y%m%d)
-        name: Modified Kernel Image
-        body: |
-          Custom kernel image with KernelSU integration
-          Flash using: fastboot flash kernel modified_kernel.img
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build kernel with logging
+        run: |
+          cd kernel
+          make -j$(nproc) O=out ARCH=arm64 \
+            CC=clang-14 \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            LD=ld.lld-14 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            KCFLAGS="-Wno-error -march=armv8.2-a" \
+            V=1 \
+            2>&1 | tee ../build.log || (echo "❌ Build failed. Showing last 200 lines:" && tail -n 200 ../build.log && exit 1)
+
+      - name: Debug: List all build output files
+        run: |
+          echo "📂 Listing all output files to help locate 'Image'..."
+          find kernel/out -type f | tee output-files.txt
+
+      - name: Copy built Image for upload
+        run: |
+          IMAGE_PATH=$(find kernel/out -type f -name Image | head -n 1)
+          if [ -f "$IMAGE_PATH" ]; then
+            cp "$IMAGE_PATH" Image
+            echo "✅ Found Image at $IMAGE_PATH"
+          else
+            echo "❌ File 'Image' not found! Build may have failed."
+            tail -n 200 build.log || true
+            exit 1
+          fi
+
+      - name: Upload Image to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        if: success()
+        with:
+          files: Image
+          tag_name: auto-build-${{ github.run_number }}
+          name: Auto Build ${{ github.run_number }}
+          body: |
+            ✅ Kernel built successfully with KernelSU
+            🧩 Output: Image only (no boot.img)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
