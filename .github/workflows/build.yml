@@ -2,9 +2,9 @@ name: Build Kernel for SM-G988B (Exynos990)
 
 on:
   workflow_dispatch:
-
-jobs:
-  build:
+ 
+    jobs:
+    build:
     runs-on: ubuntu-latest
 
     steps:
