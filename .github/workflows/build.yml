@@ -1,4 +1,4 @@
-name: Build Modified Kernel Image
+name: Build Kernel Image for SM-G988B (Exynos990)
 
 on:
   workflow_dispatch:
@@ -11,11 +11,16 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 90  # زيادة الوقت بسبب حجم البناء
+    timeout-minutes: 120
+    env:
+      KERNEL_DIR: kernel
+      OUT_DIR: out
 
     steps:
     - name: Clean workspace
-      run: rm -rf kernel out modified_kernel.img
+      run: |
+        rm -rf $KERNEL_DIR $OUT_DIR modified_kernel.img
+        mkdir -p $KERNEL_DIR
 
     - name: Install dependencies
       run: |
@@ -23,60 +28,76 @@ jobs:
         sudo apt install -y \
           bc bison build-essential clang-14 flex git libncurses-dev \
           libssl-dev lld-14 llvm-14 llvm-14-tools python3 unzip wget xz-utils \
-          device-tree-compiler kmod
-        
-        # إعداد روابط LLVM
+          device-tree-compiler kmod libelf-dev
+
+        # إعداد روابط LLVM الأساسية
         sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
         sudo ln -sf /usr/bin/llvm-nm-14 /usr/bin/llvm-nm
         sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
         echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
 
-    - name: Clone and prepare kernel
+    - name: Clone kernel source
       run: |
-        git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
-        cd kernel
+        git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git $KERNEL_DIR
+
+    - name: Setup KernelSU
+      run: |
+        cd $KERNEL_DIR
         
         # Clone KernelSU مع تحديد الإصدار
         git clone --depth=1 --branch ${{ inputs.ksu_version }} https://github.com/tiann/KernelSU.git
-        KSU_VERSION=$(git -C KernelSU rev-parse --short HEAD)
         
         # إعداد KernelSU
         mkdir -p drivers/kernelsu
         cp -r KernelSU/kernel/* drivers/kernelsu/
         echo 'obj-y += kernelsu/' >> drivers/Makefile
         echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
-        sed -i "s/#define KSU_GIT_VERSION.*/#define KSU_GIT_VERSION \"$KSU_VERSION\"/" drivers/kernelsu/ksu.h
         
         # إصلاح مشاكل معروفة
         sed -i '/MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver)/d' drivers/kernelsu/ksu.c
+        
+        # تعيين إصدار KernelSU
+        KSU_VERSION=$(git -C KernelSU rev-parse --short HEAD)
+        sed -i "s/#define KSU_GIT_VERSION.*/#define KSU_GIT_VERSION \"$KSU_VERSION\"/" drivers/kernelsu/ksu.h
+        
+        # تنظيف
+        rm -rf KernelSU
+
+    - name: Configure kernel
+      run: |
+        cd $KERNEL_DIR
+        make O=$OUT_DIR ARCH=arm64 extreme_z3s_defconfig
+        
+        # تعديل الإعدادات المطلوبة
+        ./scripts/config --file $OUT_DIR/.config \
+          --enable CONFIG_KSU \
+          --set-val CONFIG_MALI_BIFROST y \
+          --set-val CONFIG_MALI_BIFROST_R38P1 n \
+          --set-val CONFIG_MALI_PLATFORM_NAME "exynos" \
+          --disable CONFIG_DEBUG_INFO \
+          --disable CONFIG_DEBUG_KERNEL
+        
+        make O=$OUT_DIR ARCH=arm64 olddefconfig
 
     - name: Build kernel
       run: |
-        cd kernel
-        make ARCH=arm64 extreme_z3s_defconfig
-        
-        # زيادة الحد المسموح للأخطاء إذا لزم الأمر
-        ./scripts/config --file .config \
-          --set-val CONFIG_MALI_BIFROST y \
-          --set-val CONFIG_MALI_BIFROST_R38P1 n \
-          --set-val CONFIG_MALI_PLATFORM_NAME "exynos"
-        
-        make -j$(($(nproc)+1)) ARCH=arm64 \
+        cd $KERNEL_DIR
+        set -o pipefail
+        make -j$(($(nproc)/2)) O=$OUT_DIR ARCH=arm64 \
           CC=clang-14 \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
           LD=ld.lld-14 \
           LLVM=1 \
           LLVM_IAS=1 \
-          KCFLAGS="-Wno-error -march=armv8.2-a"
+          KCFLAGS="-Wno-error -march=armv8.2-a" 2>&1 | tee build.log
         
-        # التحقق من وجود صورة النواة
-        if [ -f "arch/arm64/boot/Image" ]; then
-          cp arch/arm64/boot/Image ../modified_kernel.img
-        else
-          echo "::error::Kernel image not found!"
+        if [ ! -f "$OUT_DIR/arch/arm64/boot/Image" ]; then
+          echo "::error::Kernel build failed! Last 100 lines:"
+          tail -n 100 build.log
           exit 1
         fi
+        cp $OUT_DIR/arch/arm64/boot/Image ../modified_kernel.img
 
     - name: Upload kernel image
       uses: softprops/action-gh-release@v2
@@ -88,7 +109,7 @@ jobs:
         body: |
           ### Kernel Build Summary
           - **Device**: SM-G988B (Exynos990)
-          - **KernelSU Version**: ${{ inputs.ksu_version }}
+          - **KernelSU Version**: ${{ inputs.ksu_version }} ($(git -C $KERNEL_DIR/drivers/kernelsu rev-parse --short HEAD))
           - **Build Date**: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
           
           ### Flash Instructions
