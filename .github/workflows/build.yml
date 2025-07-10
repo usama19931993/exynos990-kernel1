@@ -59,12 +59,14 @@ jobs:
             LLVM_IAS=1 \
             KCFLAGS="-Wno-error -march=armv8.2-a" \
             V=1 \
-            2>&1 | tee ../build.log || (echo "❌ Build failed. Showing last 200 lines:" && tail -n 200 ../build.log && exit 1)
+            2>&1 | tee ../build.log || (echo "❌ Build failed." && tail -n 200 ../build.log && exit 1)
 
-      - name: List output files for debug
-        run: ls -R kernel/out || echo "❌ Output directory not found"
+      - name: Debug: List all build output files
+        run: |
+          echo "📂 Listing all output files to help locate 'Image'..."
+          find kernel/out -type f | tee output-files.txt
 
-      - name: Copy built Image for upload
+      - name: Extract Image if it exists
         run: |
           IMAGE_PATH=$(find kernel/out -type f -name Image | head -n 1)
           if [ -f "$IMAGE_PATH" ]; then
