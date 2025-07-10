@@ -19,7 +19,7 @@ jobs:
         sudo apt update
         sudo apt install -y \
           bc bison build-essential clang-14 flex git libncurses-dev \
-          libssl-dev lld-14 llvm-14 llvm-14-tools python3 unzip wget xz-utils
+          libssl-dev lld-14 llvm-14 llvm-14-tools python3 unzip wget xz-utils curl
         sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
         sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
         echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
@@ -68,14 +68,23 @@ jobs:
         unzip boot-original.zip -d boot-original
         cp boot-original/boot.img .
 
-    - name: Download and setup magiskboot (official stable)
+    - name: Download and setup magiskboot (with multiple fallbacks)
+      id: magiskboot_setup
       run: |
-        # استبدال الرابط القديم بأحدث إصدار من Magisk
-        LATEST_MAGISK=$(curl -s https://api.github.com/repos/topjohnwu/Magisk/releases/latest | grep -oP '"tag_name": "\K[^"]+')
-        wget https://github.com/topjohnwu/Magisk/releases/download/$LATEST_MAGISK/magiskboot -O magiskboot || \
-          (echo "⚠️ Failed to download magiskboot, trying fallback URL..." && \
-           wget https://github.com/topjohnwu/Magisk/releases/download/v27.0/magiskboot -O magiskboot)
+        # Try to get latest version with multiple fallback methods
+        LATEST_MAGISK=$(curl -s https://api.github.com/repos/topjohnwu/Magisk/releases/latest | grep -oP '"tag_name": "\K[^"]+' || echo "v27.0")
+        echo "Trying Magisk version: $LATEST_MAGISK"
+        
+        # Multiple download attempts with different filename patterns
+        wget https://github.com/topjohnwu/Magisk/releases/download/$LATEST_MAGISK/magiskboot -O magiskboot ||
+        wget https://github.com/topjohnwu/Magisk/releases/download/$LATEST_MAGISK/magiskboot-aarch64 -O magiskboot ||
+        wget https://github.com/topjohnwu/Magisk/releases/download/v27.0/magiskboot -O magiskboot ||
+        wget https://github.com/topjohnwu/Magisk/releases/download/v27.0/magiskboot-aarch64 -O magiskboot ||
+        (echo "❌ All magiskboot download attempts failed" && exit 1)
+        
         chmod +x magiskboot
+        ./magiskboot --version || (echo "❌ magiskboot verification failed" && exit 1)
+        echo "magiskboot_version=$LATEST_MAGISK" >> $GITHUB_ENV
 
     - name: Repack boot.img with new kernel
       run: |
@@ -95,6 +104,6 @@ jobs:
         body: |
           ✅ Built and repacked for SM-G988B (Exynos990) with KernelSU
           🔧 Ready for flashing via Odin.
-          🔄 Magiskboot version: $LATEST_MAGISK
+          🔄 Magiskboot version: ${{ env.magiskboot_version }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
