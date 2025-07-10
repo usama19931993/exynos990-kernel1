@@ -11,7 +11,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 150  # زيادة الوقت بسبب حجم البناء
     env:
       KERNEL_DIR: kernel
       OUT_DIR: out
@@ -28,13 +28,14 @@ jobs:
         sudo apt install -y \
           bc bison build-essential clang-14 flex git libncurses-dev \
           libssl-dev lld-14 llvm-14 llvm-14-tools python3 unzip wget xz-utils \
-          device-tree-compiler kmod libelf-dev
+          device-tree-compiler kmod libelf-dev ccache
 
-        # إعداد روابط LLVM الأساسية
+        # إعداد روابط LLVM
         sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
         sudo ln -sf /usr/bin/llvm-nm-14 /usr/bin/llvm-nm
         sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
         echo "PATH=/usr/lib/llvm-14/bin:$PATH" >> $GITHUB_ENV
+        ccache --max-size=2G
 
     - name: Clone kernel source
       run: |
@@ -68,35 +69,51 @@ jobs:
         cd $KERNEL_DIR
         make O=$OUT_DIR ARCH=arm64 extreme_z3s_defconfig
         
-        # تعديل الإعدادات المطلوبة
+        # تعديل الإعدادات الحرجة
         ./scripts/config --file $OUT_DIR/.config \
           --enable CONFIG_KSU \
           --set-val CONFIG_MALI_BIFROST y \
           --set-val CONFIG_MALI_BIFROST_R38P1 n \
           --set-val CONFIG_MALI_PLATFORM_NAME "exynos" \
           --disable CONFIG_DEBUG_INFO \
-          --disable CONFIG_DEBUG_KERNEL
+          --disable CONFIG_DEBUG_KERNEL \
+          --disable CONFIG_KASAN
         
         make O=$OUT_DIR ARCH=arm64 olddefconfig
 
-    - name: Build kernel
+    - name: Build kernel with fixes
       run: |
         cd $KERNEL_DIR
         set -o pipefail
+        
+        # حلول بديلة لأخطاء البناء
+        export LLVM=1
+        export LLVM_IAS=1
+        export KCFLAGS="-Wno-error -march=armv8.2-a"
+        
+        # البناء مع تقليل عدد الوظائف المتوازية
         make -j$(($(nproc)/2)) O=$OUT_DIR ARCH=arm64 \
           CC=clang-14 \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
-          LD=ld.lld-14 \
-          LLVM=1 \
-          LLVM_IAS=1 \
-          KCFLAGS="-Wno-error -march=armv8.2-a" 2>&1 | tee build.log
+          LD=ld.lld-14 2>&1 | tee build.log
+        
+        # محاولة بديلة إذا فشل البناء الأولي
+        if [ ! -f "$OUT_DIR/arch/arm64/boot/Image" ]; then
+          echo "::warning::First build attempt failed, trying with reduced parallelism..."
+          make -j2 O=$OUT_DIR ARCH=arm64 \
+            CC=clang-14 \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            LD=ld.lld-14 2>&1 | tee -a build.log
+        fi
         
         if [ ! -f "$OUT_DIR/arch/arm64/boot/Image" ]; then
           echo "::error::Kernel build failed! Last 100 lines:"
           tail -n 100 build.log
           exit 1
         fi
+        
         cp $OUT_DIR/arch/arm64/boot/Image ../modified_kernel.img
 
     - name: Upload kernel image
