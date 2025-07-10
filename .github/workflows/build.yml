@@ -29,10 +29,6 @@ jobs:
         git clone --depth=1 https://github.com/usama19931993/exynos990-kernel1.git kernel
         cd kernel
         git clone https://github.com/tiann/KernelSU.git kernelSU
-        cd kernelSU
-        git fetch --tags
-        git checkout tags/v0.6.5 -b tmp-ksu
-        cd ..
         rm -rf kernelSU/.git
         mkdir -p drivers/kernelsu
         cp -r kernelSU/kernel/* drivers/kernelsu/
