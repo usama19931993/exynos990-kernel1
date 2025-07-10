@@ -8,8 +8,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout kernel source
+    - name: Checkout source
       uses: actions/checkout@v4
+
+    - name: Clean workspace
+      run: rm -rf kernel
 
     - name: Install dependencies & toolchain
       run: |
@@ -63,7 +66,7 @@ jobs:
         tag_name: auto-image-${{ github.run_number }}
         name: Kernel Image Build ${{ github.run_number }}
         body: |
-          ✅ Compiled raw Image kernel for SM-G988B (Exynos990)
-          📂 Can be merged into boot.img manually using magiskboot.
+          ✅ Raw Image built for SM-G988B (Exynos990)
+          📂 Merge it manually into your boot.img via magiskboot.
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
