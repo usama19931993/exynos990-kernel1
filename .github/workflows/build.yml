@@ -1,13 +1,11 @@
 name: Build Kernel for SM-G988B (Exynos990)
 
 on:
-   workflow_dispatch:
+  workflow_dispatch:
 
-j
-obs:
+jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
