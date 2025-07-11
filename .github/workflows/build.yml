@@ -43,14 +43,12 @@ jobs:
         yes "" | make O=out ARCH=arm64 olddefconfig
         ./scripts/config --file out/.config \
           --set-val CONFIG_MALI_BIFROST y \
-          --set-val CONFIG_MALI_BIFROST_R38P1 n \
           --set-val CONFIG_MALI_PLATFORM_NAME "exynos"
         make O=out ARCH=arm64 olddefconfig
 
     - name: Build kernel with logging
       run: |
         cd kernel
-        set -o pipefail
         make -j$(nproc) O=out ARCH=arm64 \
           CC=clang-14 \
           CLANG_TRIPLE=aarch64-linux-gnu- \
@@ -59,33 +57,14 @@ jobs:
           LLVM=1 \
           LLVM_IAS=1 \
           KCFLAGS="-Wno-error -march=armv8.2-a" \
-          V=1 | tee ../build.log
-        BUILD_STATUS=$?
-        echo "🧪 Checking for output Image file..."
-        find out -type f -iname image || true
-        if [ $BUILD_STATUS -ne 0 ]; then
-          echo "❌ Build failed. Showing last 100 lines:"
-          tail -n 100 ../build.log
-          exit 1
-        fi
-
-    - name: Copy built Image for upload
-      run: |
-        IMAGE_PATH=$(find kernel/out -type f -iname image | head -n 1)
-        if [ -f "$IMAGE_PATH" ]; then
-          cp "$IMAGE_PATH" Image
-          echo "✅ Found Image at $IMAGE_PATH"
-        else
-          echo "❌ File 'Image' not found! Build may have failed."
-          find kernel/out -type f
-          exit 1
-        fi
+          V=1 \
+          2>&1 | tee ../build.log || (echo "❌ Build failed. Showing last 200 lines:" && tail -n 200 ../build.log && exit 1)
 
     - name: Upload Image to GitHub Releases
       uses: softprops/action-gh-release@v2
       if: success()
       with:
-        files: Image
+        files: kernel/out/arch/arm64/boot/Image
         tag_name: auto-build-${{ github.run_number }}
         name: Auto Build ${{ github.run_number }}
         body: |
