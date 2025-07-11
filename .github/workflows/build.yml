@@ -64,7 +64,7 @@ jobs:
       - name: Debug: List boot folder contents
         run: |
           echo "📂 Listing boot directory:"
-          ls -lh kernel/out/arch/arm64/boot || echo "❌ boot/ directory not found"
+          find kernel/out/arch/arm64/boot || echo "❌ boot/ directory not found"
 
       - name: Copy built Image for upload
         run: |
