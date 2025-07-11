@@ -4,7 +4,10 @@ on:
   workflow_dispatch:
 
 jobs:
-     steps:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
@@ -44,10 +47,10 @@ jobs:
             --set-val CONFIG_MALI_PLATFORM_NAME "exynos"
           make O=out ARCH=arm64 olddefconfig
 
-      - name: Build kernel (Image only)
+      - name: Build kernel with logging
         run: |
           cd kernel
-          make -j$(nproc) O=out ARCH=arm64 Image \
+          make -j$(nproc) O=out ARCH=arm64 \
             CC=clang-14 \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
@@ -58,18 +61,19 @@ jobs:
             V=1 \
             2>&1 | tee ../build.log || (echo "❌ Build failed. Showing last 200 lines:" && tail -n 200 ../build.log && exit 1)
 
-      - name: Debug: List boot folder contents
+      - name: Check kernel output folder
         run: |
-          echo "📂 Listing boot directory:"
-          find kernel/out/arch/arm64/boot || echo "❌ boot/ directory not found"
+          echo "🔍 Checking contents of out/arch/arm64/boot"
+          find kernel/out/arch/arm64/boot || echo "❌ Nothing found in boot/"
 
       - name: Copy built Image for upload
         run: |
-          if [ -f kernel/out/arch/arm64/boot/Image ]; then
-            cp kernel/out/arch/arm64/boot/Image Image
-            echo "✅ Found Image"
+          IMAGE_PATH=$(find kernel/out/arch/arm64/boot -type f -name 'Image*' | head -n 1)
+          if [ -f "$IMAGE_PATH" ]; then
+            cp "$IMAGE_PATH" Image
+            echo "✅ Found Image at $IMAGE_PATH"
           else
-            echo "❌ Image not found after build."
+            echo "❌ File 'Image' not found! Build may have failed."
             exit 1
           fi
 
@@ -84,4 +88,4 @@ jobs:
             ✅ Kernel built successfully with KernelSU
             🧩 Output: Image only (no boot.img)
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }} }}
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
