@@ -8,9 +8,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Download MagiskBoot
+    - name: Download working MagiskBoot binary
       run: |
-        curl -LO https://github.com/topjohnwu/magiskboot/releases/latest/download/magiskboot
+        curl -Lo magiskboot https://github.com/ayyyed/magiskboot-static/releases/download/v25.2/magiskboot
         chmod +x magiskboot
         sudo mv magiskboot /usr/local/bin/
 
