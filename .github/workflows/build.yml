@@ -13,7 +13,7 @@ jobs:
 
     - name: Download working MagiskBoot binary (x86_64)
       run: |
-        curl -Lo magiskboot https://github.com/topjohnwu/Magisk/releases/download/v26.1/magiskboot
+        curl -Lo magiskboot https://raw.githubusercontent.com/azwhikaru/magiskboot_static/main/x86_64/magiskboot
         chmod +x magiskboot
         sudo mv magiskboot /usr/local/bin/magiskboot
 
