@@ -4,26 +4,28 @@ on:
   workflow_dispatch:
 
 jobs:
-  unpack_boot:
+  unpack:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Download working MagiskBoot binary
+    - name: Download working MagiskBoot binary (ARM64)
       run: |
-        curl -Lo magiskboot https://github.com/ayyyed/magiskboot-static/releases/download/v25.2/magiskboot
+        curl -Lo magiskboot https://github.com/ayyyed/magiskboot-static/releases/download/v25.2/magiskboot-aarch64-linux-gnu
         chmod +x magiskboot
-        sudo mv magiskboot /usr/local/bin/
+        sudo mv magiskboot /usr/local/bin/magiskboot
 
     - name: Download and unzip boot-original.zip
       run: |
         wget -q https://github.com/usama19931993/exynos990-kernel1/releases/download/boot-original/boot-original.zip
         unzip -o boot-original.zip
+        ls -lh boot.img
 
     - name: Unpack boot.img using MagiskBoot
       run: |
         magiskboot unpack boot.img
         if [ -f kernel ] && [ -f ramdisk.cpio ]; then
           echo "✅ Unpacked boot.img successfully"
+          ls -lh kernel ramdisk.cpio
         else
           echo "❌ Failed to unpack boot.img"
           ls -l
