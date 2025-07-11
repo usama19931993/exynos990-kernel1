@@ -1,4 +1,4 @@
-name: Step 2 - Unpack boot.img using MagiskBoot
+name: Step 2 - Unpack boot.img
 
 on:
   workflow_dispatch:
@@ -8,9 +8,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Download working MagiskBoot binary (ARM64)
+    - name: Set up job
+      run: echo "🚀 Starting unpack step..."
+
+    - name: Download working MagiskBoot binary (x86_64)
       run: |
-        curl -Lo magiskboot https://github.com/ayyyed/magiskboot-static/releases/download/v25.2/magiskboot-aarch64-linux-gnu
+        curl -Lo magiskboot https://github.com/topjohnwu/Magisk/releases/download/v26.1/magiskboot
         chmod +x magiskboot
         sudo mv magiskboot /usr/local/bin/magiskboot
 
