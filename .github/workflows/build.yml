@@ -30,6 +30,7 @@ jobs:
         cd kernel
         git clone https://github.com/tiann/KernelSU.git kernelSU
         rm -rf kernelSU/.git
+        mkdir -p drivers/kernelsu
         cp -r kernelSU/kernel/* drivers/kernelsu/
         echo 'obj-y += kernelsu/' >> drivers/Makefile
         echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
@@ -59,6 +60,13 @@ jobs:
           KCFLAGS="-Wno-error -march=armv8.2-a" \
           V=1 \
           2>&1 | tee ../build.log || (echo "❌ Build failed. Showing last 200 lines:" && tail -n 200 ../build.log && exit 1)
+
+    - name: Confirm Image exists before upload
+      run: |
+        if [ ! -f kernel/out/arch/arm64/boot/Image ]; then
+          echo "❌ File Image not found! Build failed or path incorrect."
+          exit 1
+        fi
 
     - name: Upload Image to GitHub Releases
       uses: softprops/action-gh-release@v2
