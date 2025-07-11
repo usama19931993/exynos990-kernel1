@@ -1,22 +1,31 @@
-name: Step 1 - Download and extract boot.img
+name: Step 2 - Unpack boot.img using MagiskBoot
 
 on:
   workflow_dispatch:
 
 jobs:
-  extract_boot:
+  unpack_boot:
     runs-on: ubuntu-latest
-    steps:
-      - name: Download boot-original.zip from GitHub Releases
-        run: |
-          wget -q https://github.com/usama19931993/exynos990-kernel1/releases/download/boot-original/boot-original.zip
 
-      - name: Unzip and verify boot.img
-        run: |
-          unzip -o boot-original.zip
-          if [ -f boot.img ]; then
-            echo "✅ boot.img extracted successfully!"
-          else
-            echo "❌ boot.img not found!"
-            exit 1
-          fi
+    steps:
+    - name: Download MagiskBoot
+      run: |
+        curl -LO https://github.com/topjohnwu/magiskboot/releases/latest/download/magiskboot
+        chmod +x magiskboot
+        sudo mv magiskboot /usr/local/bin/
+
+    - name: Download and unzip boot-original.zip
+      run: |
+        wget -q https://github.com/usama19931993/exynos990-kernel1/releases/download/boot-original/boot-original.zip
+        unzip -o boot-original.zip
+
+    - name: Unpack boot.img using MagiskBoot
+      run: |
+        magiskboot unpack boot.img
+        if [ -f kernel ] && [ -f ramdisk.cpio ]; then
+          echo "✅ Unpacked boot.img successfully"
+        else
+          echo "❌ Failed to unpack boot.img"
+          ls -l
+          exit 1
+        fi
